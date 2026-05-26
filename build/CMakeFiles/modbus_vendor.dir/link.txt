@@ -1,0 +1,2 @@
+/usr/bin/ar qc libmodbus_vendor.a  CMakeFiles/modbus_vendor.dir/third_party_libraries/libmodbus/modbus.c.o CMakeFiles/modbus_vendor.dir/third_party_libraries/libmodbus/modbus-data.c.o CMakeFiles/modbus_vendor.dir/third_party_libraries/libmodbus/modbus-rtu.c.o CMakeFiles/modbus_vendor.dir/third_party_libraries/libmodbus/modbus-tcp.c.o
+/usr/bin/ranlib libmodbus_vendor.a

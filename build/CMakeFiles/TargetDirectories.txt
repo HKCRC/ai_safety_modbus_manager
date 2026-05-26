@@ -1,0 +1,6 @@
+/root/ai_safety_modbus_manager/build/CMakeFiles/rebuild_cache.dir
+/root/ai_safety_modbus_manager/build/CMakeFiles/edit_cache.dir
+/root/ai_safety_modbus_manager/build/CMakeFiles/test.dir
+/root/ai_safety_modbus_manager/build/CMakeFiles/ai_safety_modbus_manager.dir
+/root/ai_safety_modbus_manager/build/CMakeFiles/device_headers_test.dir
+/root/ai_safety_modbus_manager/build/CMakeFiles/modbus_vendor.dir

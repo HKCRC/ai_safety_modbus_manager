@@ -1,0 +1,33 @@
+{
+    "crane_type": "flat",
+    "x86_ip": "192.168.61.2",
+    "trolley_ip": "192.168.61.36",
+    "cab_bridge_ip": "192.168.61.67",
+    "trolley_bridge_ip": "192.168.61.62",
+
+    "trolley_port": 502,
+    "trolley_slave": 1,
+
+    "hook_dev": "/dev/ttyS0",
+    "hook_baud": 9600,
+    "hook_parity": "N",
+    "hook_data_bit": 8,
+    "hook_stop_bit": 1,
+    "hook_slave": 3,
+
+    "encoder_dev": "/dev/ttyS1",
+    "encoder_baud": 9600,
+    "encoder_parity": "E",
+    "encoder_data_bit": 8,
+    "encoder_stop_bit": 1,
+    "encoder_slave": 1,
+
+    "laser_scale_m": 0.001,
+    "laser1_tilt_deg": 4.0,
+    "laser2_tilt_deg": 12.0,
+
+    "encoder_k": 1.0,
+    "encoder_b": 0.0,
+
+    "loop_ms": 1000
+}
