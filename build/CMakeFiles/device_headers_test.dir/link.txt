@@ -1,1 +1,0 @@
-/usr/bin/c++     CMakeFiles/device_headers_test.dir/tests/device_headers_test.cpp.o  -o device_headers_test  libai_safety_modbus_manager.a -lpthread libmodbus_vendor.a /usr/lib/x86_64-linux-gnu/libjsoncpp.so.1.7.4 
