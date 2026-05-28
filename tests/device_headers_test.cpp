@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 
+#include "bridge/shared_memory_bridge.h"
 #include "config/modbus_config.h"
 #include "devices/hookWarning.h"
 #include "devices/multi_turn_encoder_rtu.h"
@@ -27,17 +28,81 @@ const char* default_config_path() {
 #endif
 }
 
+std::string to_text(ai_safety_common::DeviceStatus::SolarChargeState value) {
+    switch (value) {
+        case ai_safety_common::DeviceStatus::SolarChargeState::Unknown: return "Unknown";
+        case ai_safety_common::DeviceStatus::SolarChargeState::NotCharging: return "NotCharging";
+        case ai_safety_common::DeviceStatus::SolarChargeState::Charging: return "Charging";
+        case ai_safety_common::DeviceStatus::SolarChargeState::Fault: return "Fault";
+    }
+    return "Unknown";
+}
+
+std::string to_text(ai_safety_common::DeviceStatus::EquipmentState value) {
+    switch (value) {
+        case ai_safety_common::DeviceStatus::EquipmentState::Unknown: return "Unknown";
+        case ai_safety_common::DeviceStatus::EquipmentState::Offline: return "Offline";
+        case ai_safety_common::DeviceStatus::EquipmentState::Standby: return "Standby";
+        case ai_safety_common::DeviceStatus::EquipmentState::Active: return "Active";
+        case ai_safety_common::DeviceStatus::EquipmentState::Error: return "Error";
+    }
+    return "Unknown";
+}
+
+std::string to_text(ai_safety_common::FaultInfo::Category value) {
+    switch (value) {
+        case ai_safety_common::FaultInfo::Category::None: return "None";
+        case ai_safety_common::FaultInfo::Category::CabBridgeFault: return "CabBridgeFault";
+        case ai_safety_common::FaultInfo::Category::TrolleyBridgeFault: return "TrolleyBridgeFault";
+        case ai_safety_common::FaultInfo::Category::TrolleyStm32Fault: return "TrolleyStm32Fault";
+    }
+    return "None";
+}
+
+void print_shared_memory_preview(const ai_safety_common::DeviceStatus& status) {
+    std::cout << "[提示] 将发送 DeviceStatus:\n"
+              << "  timestamp=" << status.timestamp << '\n'
+              << "  solarCharge=" << to_text(status.solarCharge) << '\n'
+              << "  trolleyState=" << to_text(status.trolleyState) << '\n'
+              << "  trolleyBattery.percent=" << static_cast<int>(status.trolleyBattery.percent) << '\n'
+              << "  trolleyBattery.remainingMin=" << status.trolleyBattery.remainingMin << '\n'
+              << "  trolleyBattery.isCharging=" << static_cast<int>(status.trolleyBattery.isCharging) << '\n'
+              << "  trolleyBattery.chargingTimeMin=" << status.trolleyBattery.chargingTimeMin << '\n'
+              << "  trolleyBattery.voltageV=" << status.trolleyBattery.voltageV << '\n'
+              << "  trolleyBattery.currentA=" << status.trolleyBattery.currentA << '\n'
+              << "  hookState=" << to_text(status.hookState) << '\n'
+              << "  hookBattery.percent=" << static_cast<int>(status.hookBattery.percent) << '\n'
+              << "  hookBattery.remainingMin=" << status.hookBattery.remainingMin << '\n'
+              << "  hookBattery.isCharging=" << static_cast<int>(status.hookBattery.isCharging) << '\n'
+              << "  hookBattery.chargingTimeMin=" << status.hookBattery.chargingTimeMin << '\n'
+              << "  hookBattery.voltageV=" << status.hookBattery.voltageV << '\n'
+              << "  hookBattery.currentA=" << status.hookBattery.currentA << '\n';
+}
+
+void print_shared_memory_preview(const ai_safety_common::FaultInfo& status) {
+    std::cout << "[提示] 将发送 FaultInfo:\n"
+              << "  timestamp=" << status.timestamp << '\n'
+              << "  category=" << to_text(status.category) << '\n';
+}
+
+void print_shared_memory_preview(const ai_safety_common::CraneState& state) {
+    std::cout << "[提示] 将发送 CraneState:\n"
+              << "  timestamp=" << state.timestamp << '\n'
+              << "  hookToTrolleyDistanceM=" << state.hookToTrolleyDistanceM << '\n'
+              << "  groundToTrolleyDistanceM=" << state.groundToTrolleyDistanceM << '\n';
+}
+
 bool fail(const std::string& message) {
-    std::cerr << "[FAIL] " << message << '\n';
+    std::cerr << "[失败] " << message << '\n';
     return false;
 }
 
 bool expect_ok(bool condition, const std::string& step) {
     if (!condition) {
-        std::cerr << "[FAIL] " << step << '\n';
+        std::cerr << "[失败] " << step << '\n';
         return false;
     }
-    std::cout << "[PASS] " << step << '\n';
+    std::cout << "[通过] " << step << '\n';
     return true;
 }
 
@@ -99,7 +164,7 @@ int prompt_menu_choice(const std::string& title, const std::vector<std::string>&
             }
         } catch (...) {
         }
-        std::cout << "[WARN] 无效输入，请重新输入。\n";
+        std::cout << "[警告] 无效输入，请重新输入。\n";
     }
 }
 
@@ -108,7 +173,7 @@ bool prompt_yes_no(const std::string& prompt) {
         const std::string line = read_line(prompt + " [y/n]: ");
         if (line == "y" || line == "Y") return true;
         if (line == "n" || line == "N" || line.empty()) return false;
-        std::cout << "[WARN] 请输入 y 或 n。\n";
+        std::cout << "[警告] 请输入 y 或 n。\n";
     }
 }
 
@@ -118,28 +183,28 @@ bool prompt_int_in_range(const std::string& label, int current, int min_value, i
                                            ", 范围=" + std::to_string(min_value) + "~" +
                                            std::to_string(max_value) + ", 直接回车取消]: ");
         if (line.empty()) {
-            std::cout << "[INFO] 已取消写入\n";
+            std::cout << "[提示] 已取消写入\n";
             return false;
         }
 
         try {
             const int value = std::stoi(line);
             if (value < min_value || value > max_value) {
-                std::cout << "[WARN] 输入超出范围，请重新输入。\n";
+                std::cout << "[警告] 输入超出范围，请重新输入。\n";
                 continue;
             }
             out_value = value;
             return true;
         } catch (...) {
-            std::cout << "[WARN] 无效输入，请输入整数。\n";
+            std::cout << "[警告] 无效输入，请输入整数。\n";
         }
     }
 }
 
 bool load_config(const std::string& path, ModbusConfig& config) {
-    std::cout << "[INFO] loading config: " << path << '\n';
+    std::cout << "[提示] 正在加载配置文件: " << path << '\n';
     if (!config.loadFromFile(path)) {
-        return fail("failed to load config file");
+        return fail("加载配置文件失败");
     }
     return true;
 }
@@ -167,42 +232,42 @@ template <typename Device, typename Factory, typename Action>
 bool with_connected_device(const std::string& name, Factory factory, Action action) {
     Device device = factory();
     if (!device.connect()) {
-        return fail(name + " connect failed");
+        return fail(name + " 连接失败");
     }
 
     bool ok = true;
-    ok &= expect_ok(device.isConnected(), name + " isConnected() after connect");
+    ok &= expect_ok(device.isConnected(), name + " 连接后 isConnected() 为真");
     if (ok) {
         ok &= action(device);
     }
 
     device.disconnect();
-    ok &= expect_ok(!device.isConnected(), name + " isConnected() after disconnect");
+    ok &= expect_ok(!device.isConnected(), name + " 断开后 isConnected() 为假");
     return ok;
 }
 
 bool hook_read_and_print_status(HookWarning& hook) {
     bool ok = true;
-    ok &= expect_ok(hook.refreshStatus(), "hook refreshStatus()");
+    ok &= expect_ok(hook.refreshStatus(), "吊钩执行 refreshStatus()");
     if (!ok) {
         return false;
     }
 
     std::cout << std::fixed << std::setprecision(2)
-              << "[INFO] hook battery=" << hook.get_battery_level_feedback()
-              << "% volume=" << hook.get_volume_feedback()
-              << " discharge=" << hook.getDischargeTime()
-              << " workmode=" << hook.getWorkmode()
-              << " charging=" << hook.getChargingStatus()
-              << " charge_time=" << hook.getChargeTime()
-              << " voltage=" << hook.getVoltage()
-              << " current=" << hook.getCurrent()
-              << " shutdown=" << hook.getShutdownTime()
-              << " startup=" << hook.getStartupTime()
-              << " error=" << hook.getErrorCode()
-              << " stm_rtc=" << hook.getStmRtcTime()
-              << " standby_enable=" << hook.getStandbyEnable()
-              << " pc_rtc=" << hook.getPcRtcTime()
+              << "[提示] 吊钩状态: 电量=" << hook.get_battery_level_feedback()
+              << "% 音量=" << hook.get_volume_feedback()
+              << " 放电时间=" << hook.getDischargeTime()
+              << " 工作模式=" << hook.getWorkmode()
+              << " 充电状态=" << hook.getChargingStatus()
+              << " 充电时间=" << hook.getChargeTime()
+              << " 电压=" << hook.getVoltage()
+              << " 电流=" << hook.getCurrent()
+              << " 关机时间=" << hook.getShutdownTime()
+              << " 开机时间=" << hook.getStartupTime()
+              << " 错误码=" << hook.getErrorCode()
+              << " STM时间=" << hook.getStmRtcTime()
+              << " 待机使能=" << hook.getStandbyEnable()
+              << " PC时间=" << hook.getPcRtcTime()
               << '\n';
     return true;
 }
@@ -237,7 +302,7 @@ bool hook_test_volume(const ModbusConfig& config) {
                 return false;
             }
             const uint16_t current_volume = hook.get_volume_feedback();
-            return expect_ok(hook.setVolume(current_volume), "hook setVolume(current)");
+            return expect_ok(hook.setVolume(current_volume), "吊钩执行 setVolume(当前值)");
         });
 }
 
@@ -254,11 +319,11 @@ bool hook_test_heartbeat(const ModbusConfig& config) {
         },
         [&](HookWarning& hook) {
             bool ok = true;
-            ok &= expect_ok(hook.sendHeartbeat(), "hook sendHeartbeat()");
+            ok &= expect_ok(hook.sendHeartbeat(), "吊钩执行 sendHeartbeat()");
             uint16_t heartbeat_value = 0;
-            ok &= expect_ok(hook.readHeartbeat(heartbeat_value), "hook readHeartbeat()");
+            ok &= expect_ok(hook.readHeartbeat(heartbeat_value), "吊钩执行 readHeartbeat()");
             if (ok) {
-                std::cout << "[INFO] hook heartbeat=" << heartbeat_value << '\n';
+                std::cout << "[提示] 吊钩心跳值=" << heartbeat_value << '\n';
             }
             return ok;
         });
@@ -281,8 +346,8 @@ bool hook_test_rfid_getters(const ModbusConfig& config) {
             }
             const uint16_t valid_index = hook.getValidIndex();
             const auto entries = hook.getValidRfidEntries();
-            std::cout << "[INFO] hook valid_index=0x" << std::hex << valid_index << std::dec
-                      << " valid_entries=" << entries.size() << '\n';
+            std::cout << "[提示] 吊钩有效 RFID 索引掩码=0x" << std::hex << valid_index << std::dec
+                      << " 有效条目数=" << entries.size() << '\n';
             for (int i = 0; i < HookWarning::NUM_RFID_INDICES; ++i) {
                 const bool valid = hook.isRfidValid(i);
                 const RfidEntry entry = hook.getRfidEntry(i);
@@ -290,10 +355,10 @@ bool hook_test_rfid_getters(const ModbusConfig& config) {
                 const uint8_t signal = hook.getRfidSignalStrength(i);
                 const uint8_t battery = hook.getRfidBattery(i);
                 if (valid) {
-                    std::cout << "[INFO] RFID[" << i << "] uid=" << uid
-                              << " signal=" << static_cast<int>(signal)
-                              << " battery=" << static_cast<int>(battery)
-                              << " entry_uid=" << entry.uid << '\n';
+                    std::cout << "[提示] RFID[" << i << "] uid=" << uid
+                              << " 信号强度=" << static_cast<int>(signal)
+                              << " 电量=" << static_cast<int>(battery)
+                              << " entry.uid=" << entry.uid << '\n';
                 }
             }
             return true;
@@ -313,8 +378,8 @@ bool hook_test_alert_sequence(const ModbusConfig& config, int signal_index, cons
         },
         [&](HookWarning& hook) {
             bool ok = true;
-            ok &= expect_ok(hook.slot_warning(signal_index), "hook " + name);
-            ok &= expect_ok(hook.slot_warning(0), "hook slot_warning(0) restore");
+            ok &= expect_ok(hook.slot_warning(signal_index), "吊钩执行 " + name);
+            ok &= expect_ok(hook.slot_warning(0), "吊钩执行 slot_warning(0) 恢复");
             return ok;
         });
 }
@@ -331,7 +396,7 @@ bool hook_test_run_thread(const ModbusConfig& config) {
                                config.hook_slave);
         },
         [&](HookWarning& hook) {
-            const bool ok = expect_ok(hook.run(), "hook run()");
+            const bool ok = expect_ok(hook.run(), "吊钩执行 run()");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             return ok;
         });
@@ -354,26 +419,21 @@ bool hook_test_all(const ModbusConfig& config) {
 }
 
 bool trolley_read_and_print_status(TrolleyControl& trolley, TrolleyStatus& status) {
-    if (!expect_ok(trolley.readStatus(status), "trolley readStatus()")) {
+    if (!expect_ok(trolley.readStatus(status), "小车执行 readStatus()")) {
         return false;
     }
     std::cout << std::fixed << std::setprecision(2)
-              << "[INFO] trolley status dump\n"
-              << "  power_3v3_on=" << static_cast<int>(status.power_3v3_on) << '\n'
-              << "  power_5v_on=" << static_cast<int>(status.power_5v_on) << '\n'
-              << "  power_cctv_on=" << static_cast<int>(status.power_cctv_on) << '\n'
-              << "  power_4g_on=" << static_cast<int>(status.power_4g_on) << '\n'
+              << "[提示] 小车状态详情\n"
               << "  standby_mode_active=" << static_cast<int>(status.standby_mode_active) << '\n'
-              << "  bms_charging=" << static_cast<int>(status.bms_charging) << '\n'
-              << "  bridge_ping_ok=" << static_cast<int>(status.bridge_ping_ok) << '\n'
-              << "  battery_bms_read_ok=" << static_cast<int>(status.battery_bms_read_ok) << '\n'
+              << "  sleep_mode_active=" << static_cast<int>(status.sleep_mode_active) << '\n'
+              << "  bms_read_ok=" << static_cast<int>(status.bms_read_ok) << '\n'
               << "  mppt_read_ok=" << static_cast<int>(status.mppt_read_ok) << '\n'
               << "  laser_1_read_ok=" << static_cast<int>(status.laser_1_read_ok) << '\n'
               << "  laser_2_read_ok=" << static_cast<int>(status.laser_2_read_ok) << '\n'
               << "  cctv_ping_ok=" << static_cast<int>(status.cctv_ping_ok) << '\n'
-              << "  system_version=" << status.system_version << '\n'
+              << "  bms_charging=" << static_cast<int>(status.bms_charging) << '\n'
+              << "  bridge_ping_ok=" << static_cast<int>(status.bridge_ping_ok) << '\n'
               << "  system_error_code=" << status.system_error_code << '\n'
-              << "  battery_version=" << status.battery_version << '\n'
               << "  battery_level=" << static_cast<int>(status.battery_level) << '\n'
               << "  discharge_time_valid=" << static_cast<int>(status.discharge_time_valid) << '\n'
               << "  discharge_time_min=" << status.discharge_time_min << '\n'
@@ -383,14 +443,7 @@ bool trolley_read_and_print_status(TrolleyControl& trolley, TrolleyStatus& statu
               << "  battery_current_a=" << status.battery_current_a << '\n'
               << "  laser_distance[0]=" << status.laser_distance[0] << '\n'
               << "  laser_distance[1]=" << status.laser_distance[1] << '\n'
-              << "  laser_distance[2]=" << status.laser_distance[2] << '\n'
               << "  mppt_charge_status=" << status.mppt_charge_status << '\n'
-              << "  shutdown_time=" << status.shutdown_time << '\n'
-              << "  startup_time=" << status.startup_time << '\n'
-              << "  work_mode=" << status.work_mode << '\n'
-              << "  rtc_sys_time_diff=" << status.rtc_sys_time_diff << '\n'
-              << "  rtc_hour=" << status.rtc_hour << '\n'
-              << "  rtc_minute=" << status.rtc_minute << '\n'
               << "  device_status=" << status.device_status << '\n';
     return true;
 }
@@ -413,8 +466,8 @@ bool trolley_test_power_3v3(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入 3V3 电源目标值", status.power_3v3_on, 0, 1, target)) return true;
-            return expect_ok(trolley.setPower3v3(static_cast<std::uint8_t>(target)), "trolley setPower3v3(target)");
+            if (!prompt_int_in_range("输入 3V3 电源目标值", 0, 0, 1, target)) return true;
+            return expect_ok(trolley.setPower3v3(static_cast<std::uint8_t>(target)), "小车执行 setPower3v3(目标值)");
         });
 }
 
@@ -426,8 +479,8 @@ bool trolley_test_power_5v(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入 5V 电源目标值", status.power_5v_on, 0, 1, target)) return true;
-            return expect_ok(trolley.setPower5v(static_cast<std::uint8_t>(target)), "trolley setPower5v(target)");
+            if (!prompt_int_in_range("输入 5V 电源目标值", 0, 0, 1, target)) return true;
+            return expect_ok(trolley.setPower5v(static_cast<std::uint8_t>(target)), "小车执行 setPower5v(目标值)");
         });
 }
 
@@ -439,8 +492,8 @@ bool trolley_test_power_cctv(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入 CCTV 电源目标值", status.power_cctv_on, 0, 1, target)) return true;
-            return expect_ok(trolley.setPowerCctv(static_cast<std::uint8_t>(target)), "trolley setPowerCctv(target)");
+            if (!prompt_int_in_range("输入 CCTV 电源目标值", 0, 0, 1, target)) return true;
+            return expect_ok(trolley.setPowerCctv(static_cast<std::uint8_t>(target)), "小车执行 setPowerCctv(目标值)");
         });
 }
 
@@ -452,8 +505,8 @@ bool trolley_test_power_4g(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入 4G 电源目标值", status.power_4g_on, 0, 1, target)) return true;
-            return expect_ok(trolley.setPower4g(static_cast<std::uint8_t>(target)), "trolley setPower4g(target)");
+            if (!prompt_int_in_range("输入 4G 电源目标值", 0, 0, 1, target)) return true;
+            return expect_ok(trolley.setPower4g(static_cast<std::uint8_t>(target)), "小车执行 setPower4g(目标值)");
         });
 }
 
@@ -467,7 +520,7 @@ bool trolley_test_standby_enable(const ModbusConfig& config) {
             int target = 0;
             if (!prompt_int_in_range("输入待机使能目标值", status.standby_mode_active, 0, 1, target)) return true;
             return expect_ok(trolley.setStandbyEnable(static_cast<std::uint8_t>(target)),
-                             "trolley setStandbyEnable(target)");
+                             "小车执行 setStandbyEnable(目标值)");
         });
 }
 
@@ -481,7 +534,7 @@ bool trolley_test_standby_power_mode(const ModbusConfig& config) {
             int target = 0;
             if (!prompt_int_in_range("输入待机电源模式目标值", status.standby_mode_active, 0, 1, target)) return true;
             return expect_ok(trolley.setStandbyPowerMode(static_cast<std::uint8_t>(target)),
-                             "trolley setStandbyPowerMode(target)");
+                             "小车执行 setStandbyPowerMode(目标值)");
         });
 }
 
@@ -493,8 +546,8 @@ bool trolley_test_work_mode(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入工作模式目标值", status.work_mode, 0, 65535, target)) return true;
-            return expect_ok(trolley.setWorkMode(static_cast<uint16_t>(target)), "trolley setWorkMode(target)");
+            if (!prompt_int_in_range("输入工作模式目标值", 0, 0, 65535, target)) return true;
+            return expect_ok(trolley.setWorkMode(static_cast<uint16_t>(target)), "小车执行 setWorkMode(目标值)");
         });
 }
 
@@ -507,10 +560,10 @@ bool trolley_test_rtc(const ModbusConfig& config) {
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int hour = 0;
             int minute = 0;
-            if (!prompt_int_in_range("输入 RTC 小时", status.rtc_hour, 0, 23, hour)) return true;
-            if (!prompt_int_in_range("输入 RTC 分钟", status.rtc_minute, 0, 59, minute)) return true;
+            if (!prompt_int_in_range("输入 RTC 小时", 0, 0, 23, hour)) return true;
+            if (!prompt_int_in_range("输入 RTC 分钟", 0, 0, 59, minute)) return true;
             return expect_ok(trolley.setRtcTime(static_cast<uint16_t>(hour), static_cast<uint16_t>(minute)),
-                             "trolley setRtcTime(target)");
+                             "小车执行 setRtcTime(目标值)");
         });
 }
 
@@ -522,8 +575,8 @@ bool trolley_test_startup_time(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入开机时间目标值", status.startup_time, 0, 65535, target)) return true;
-            return expect_ok(trolley.setStartupTime(static_cast<uint16_t>(target)), "trolley setStartupTime(target)");
+            if (!prompt_int_in_range("输入开机时间目标值", 0, 0, 65535, target)) return true;
+            return expect_ok(trolley.setStartupTime(static_cast<uint16_t>(target)), "小车执行 setStartupTime(目标值)");
         });
 }
 
@@ -535,20 +588,20 @@ bool trolley_test_shutdown_time(const ModbusConfig& config) {
             TrolleyStatus status{};
             if (!trolley_read_and_print_status(trolley, status)) return false;
             int target = 0;
-            if (!prompt_int_in_range("输入关机时间目标值", status.shutdown_time, 0, 65535, target)) return true;
-            return expect_ok(trolley.setShutdownTime(static_cast<uint16_t>(target)), "trolley setShutdownTime(target)");
+            if (!prompt_int_in_range("输入关机时间目标值", 0, 0, 65535, target)) return true;
+            return expect_ok(trolley.setShutdownTime(static_cast<uint16_t>(target)), "小车执行 setShutdownTime(目标值)");
         });
 }
 
 bool trolley_test_reboot(const ModbusConfig& config) {
-    if (!prompt_yes_no("确认触发 trolley reboot? 这是高风险操作")) {
-        std::cout << "[INFO] 已取消 trolley reboot 测试\n";
+    if (!prompt_yes_no("确认触发小车 reboot? 这是高风险操作")) {
+        std::cout << "[提示] 已取消小车 reboot 测试\n";
         return true;
     }
     return with_connected_device<TrolleyControl>(
         "trolley",
         [&]() { return TrolleyControl(config.trolley_ip, config.trolley_port, config.trolley_slave); },
-        [&](TrolleyControl& trolley) { return expect_ok(trolley.triggerReboot(), "trolley triggerReboot()"); });
+        [&](TrolleyControl& trolley) { return expect_ok(trolley.triggerReboot(), "小车执行 triggerReboot()"); });
 }
 
 bool trolley_test_all(const ModbusConfig& config) {
@@ -569,11 +622,11 @@ bool trolley_test_all(const ModbusConfig& config) {
 }
 
 bool encoder_read_position(MultiTurnEncoderRTU& encoder, int32_t& position) {
-    return expect_ok(encoder.readEncoderPosition(position), "encoder readEncoderPosition()");
+    return expect_ok(encoder.readEncoderPosition(position), "编码器执行 readEncoderPosition()");
 }
 
 bool encoder_read_settings(MultiTurnEncoderRTU& encoder, MultiTurnEncoderRTU::EncoderSettings& settings) {
-    return expect_ok(encoder.readEncoderSettings(settings), "encoder readEncoderSettings()");
+    return expect_ok(encoder.readEncoderSettings(settings), "编码器执行 readEncoderSettings()");
 }
 
 bool encoder_test_basic(const ModbusConfig& config) {
@@ -594,11 +647,11 @@ bool encoder_test_basic(const ModbusConfig& config) {
             ok &= encoder_read_position(encoder, position);
             ok &= encoder_read_settings(encoder, settings);
             if (ok) {
-                std::cout << "[INFO] encoder position=" << position
-                          << " addr=" << settings.deviceAddress
-                          << " baud=" << static_cast<int>(settings.baudRate)
-                          << " direction=" << static_cast<int>(settings.countingDirection)
-                          << " parity=" << static_cast<int>(settings.parityCheck)
+                std::cout << "[提示] 编码器位置=" << position
+                          << " 地址=" << settings.deviceAddress
+                          << " 波特率=" << static_cast<int>(settings.baudRate)
+                          << " 计数方向=" << static_cast<int>(settings.countingDirection)
+                          << " 校验位=" << static_cast<int>(settings.parityCheck)
                           << '\n';
             }
             return ok;
@@ -621,11 +674,11 @@ bool encoder_test_turns(const ModbusConfig& config) {
             double timestamp = 0.0;
             double duration = 0.0;
             const bool ok = expect_ok(encoder.readEncoderNumberOfTurns(turns, timestamp, duration),
-                                      "encoder readEncoderNumberOfTurns()");
+                                      "编码器执行 readEncoderNumberOfTurns()");
             if (ok) {
-                std::cout << "[INFO] encoder turns=" << turns
-                          << " timestamp=" << timestamp
-                          << " duration=" << duration << '\n';
+                std::cout << "[提示] 编码器圈数=" << turns
+                          << " 时间戳=" << timestamp
+                          << " 持续时间=" << duration << '\n';
             }
             return ok;
         });
@@ -645,7 +698,7 @@ bool encoder_test_write_position(const ModbusConfig& config) {
         [&](MultiTurnEncoderRTU& encoder) {
             int32_t position = 0;
             if (!encoder_read_position(encoder, position)) return false;
-            return expect_ok(encoder.writeEncoderPosition(position), "encoder writeEncoderPosition(current)");
+            return expect_ok(encoder.writeEncoderPosition(position), "编码器执行 writeEncoderPosition(当前值)");
         });
 }
 
@@ -662,9 +715,9 @@ bool encoder_test_raw_settings(const ModbusConfig& config) {
         },
         [&](MultiTurnEncoderRTU& encoder) {
             uint16_t regs[4] = {0};
-            const bool ok = expect_ok(encoder.readRawSettings(regs), "encoder readRawSettings()");
+            const bool ok = expect_ok(encoder.readRawSettings(regs), "编码器执行 readRawSettings()");
             if (ok) {
-                std::cout << "[INFO] raw settings: [" << regs[0] << ", " << regs[1] << ", " << regs[2]
+                std::cout << "[提示] 原始设置寄存器: [" << regs[0] << ", " << regs[1] << ", " << regs[2]
                           << ", " << regs[3] << "]\n";
             }
             return ok;
@@ -685,13 +738,13 @@ bool encoder_test_string_settings(const ModbusConfig& config) {
         [&](MultiTurnEncoderRTU& encoder) {
             const auto settings = encoder.getEncoderSettings();
             const bool ok = (settings.deviceAddress != "Error");
-            if (!expect_ok(ok, "encoder getEncoderSettings()")) {
+            if (!expect_ok(ok, "编码器执行 getEncoderSettings()")) {
                 return false;
             }
-            std::cout << "[INFO] encoder settings: addr=" << settings.deviceAddress
-                      << " baud=" << settings.baudRate
-                      << " direction=" << settings.countingDirection
-                      << " parity=" << settings.parityCheck << '\n';
+            std::cout << "[提示] 编码器格式化设置: 地址=" << settings.deviceAddress
+                      << " 波特率=" << settings.baudRate
+                      << " 计数方向=" << settings.countingDirection
+                      << " 校验位=" << settings.parityCheck << '\n';
             return true;
         });
 }
@@ -711,7 +764,7 @@ bool encoder_test_write_device_address(const ModbusConfig& config) {
             MultiTurnEncoderRTU::EncoderSettings settings{};
             if (!encoder_read_settings(encoder, settings)) return false;
             return expect_ok(encoder.write485DeviceAddress(settings.deviceAddress),
-                             "encoder write485DeviceAddress(current)");
+                             "编码器执行 write485DeviceAddress(当前值)");
         });
 }
 
@@ -729,7 +782,7 @@ bool encoder_test_write_baud(const ModbusConfig& config) {
         [&](MultiTurnEncoderRTU& encoder) {
             MultiTurnEncoderRTU::EncoderSettings settings{};
             if (!encoder_read_settings(encoder, settings)) return false;
-            return expect_ok(encoder.writeBaudRate(settings.baudRate), "encoder writeBaudRate(current)");
+            return expect_ok(encoder.writeBaudRate(settings.baudRate), "编码器执行 writeBaudRate(当前值)");
         });
 }
 
@@ -748,7 +801,7 @@ bool encoder_test_write_direction(const ModbusConfig& config) {
             MultiTurnEncoderRTU::EncoderSettings settings{};
             if (!encoder_read_settings(encoder, settings)) return false;
             return expect_ok(encoder.writeCountingDirection(settings.countingDirection),
-                             "encoder writeCountingDirection(current)");
+                             "编码器执行 writeCountingDirection(当前值)");
         });
 }
 
@@ -767,7 +820,7 @@ bool encoder_test_write_parity(const ModbusConfig& config) {
             MultiTurnEncoderRTU::EncoderSettings settings{};
             if (!encoder_read_settings(encoder, settings)) return false;
             return expect_ok(encoder.writeParityCheck(settings.parityCheck),
-                             "encoder writeParityCheck(current)");
+                             "编码器执行 writeParityCheck(当前值)");
         });
 }
 
@@ -787,15 +840,15 @@ bool encoder_test_run_once_and_data(const ModbusConfig& config) {
             const StampedDouble data = encoder.getData();
             const double timestamp = encoder.getDataTimestamp();
             const auto encoder_data = encoder.getEncoderData();
-            std::cout << "[INFO] encoder getRunLoopSleepMs=" << encoder.getRunLoopSleepMs() << '\n'
-                      << "[INFO] encoder data timestamp=" << data.timestamp
-                      << " variance=" << data.time_variance
-                      << " value=" << data.value << '\n'
-                      << "[INFO] encoder getDataTimestamp=" << timestamp << '\n'
-                      << "[INFO] encoder_data timestamp=" << encoder_data.timestamp
-                      << " variance=" << encoder_data.time_variance
-                      << " value=" << encoder_data.value
-                      << " velocity=" << encoder_data.velocity << '\n';
+            std::cout << "[提示] 编码器 getRunLoopSleepMs=" << encoder.getRunLoopSleepMs() << '\n'
+                      << "[提示] 编码器 getData(): 时间戳=" << data.timestamp
+                      << " 方差=" << data.time_variance
+                      << " 数值=" << data.value << '\n'
+                      << "[提示] 编码器 getDataTimestamp()=" << timestamp << '\n'
+                      << "[提示] 编码器 getEncoderData(): 时间戳=" << encoder_data.timestamp
+                      << " 方差=" << encoder_data.time_variance
+                      << " 数值=" << encoder_data.value
+                      << " 速度=" << encoder_data.velocity << '\n';
             return true;
         });
 }
@@ -816,7 +869,7 @@ bool encoder_test_update_and_velocity(const ModbusConfig& config) {
             double timestamp = 0.0;
             double duration = 0.0;
             if (!expect_ok(encoder.readEncoderNumberOfTurns(turns, timestamp, duration),
-                           "encoder readEncoderNumberOfTurns() before updateEncoderData")) {
+                           "编码器在 updateEncoderData() 前执行 readEncoderNumberOfTurns()")) {
                 return false;
             }
             for (int i = 0; i < 120; ++i) {
@@ -826,9 +879,9 @@ bool encoder_test_update_and_velocity(const ModbusConfig& config) {
             }
             const double velocity = encoder.computeVelocity();
             const auto encoder_data = encoder.getEncoderData();
-            std::cout << "[INFO] encoder computed velocity=" << velocity
-                      << " latest value=" << encoder_data.value
-                      << " latest velocity=" << encoder_data.velocity << '\n';
+            std::cout << "[提示] 编码器计算速度=" << velocity
+                      << " 最新数值=" << encoder_data.value
+                      << " 最新速度=" << encoder_data.velocity << '\n';
             return true;
         });
 }
@@ -848,7 +901,7 @@ bool encoder_test_run_thread(const ModbusConfig& config) {
             encoder.run();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             encoder.stop();
-            return expect_ok(true, "encoder run()/stop()");
+            return expect_ok(true, "编码器执行 run()/stop()");
         });
 }
 
@@ -868,6 +921,84 @@ bool encoder_test_all(const ModbusConfig& config) {
     if (prompt_yes_no("是否执行 encoder run/stop 线程测试?")) {
         ok &= encoder_test_run_thread(config);
     }
+    return ok;
+}
+
+bool shared_memory_preview_test(const ModbusConfig& config) {
+    std::cout << "[提示] 开始共享内存发送预览测试，只打印桥接层准备发送的数据，不会真正对外发送。\n";
+
+    TrolleyControl trolley(config.trolley_ip, config.trolley_port, config.trolley_slave);
+    if (!trolley.connect()) {
+        return fail("共享内存预览测试时，小车连接失败");
+    }
+
+    HookWarning hook(config.hook_dev,
+                     config.hook_baud,
+                     config.hook_parity,
+                     config.hook_data_bit,
+                     config.hook_stop_bit,
+                     config.hook_slave);
+    if (!hook.connect()) {
+        trolley.disconnect();
+        return fail("共享内存预览测试时，吊钩连接失败");
+    }
+
+    MultiTurnEncoderRTU encoder(config.encoder_dev.c_str(),
+                                config.encoder_baud,
+                                config.encoder_parity,
+                                config.encoder_data_bit,
+                                config.encoder_stop_bit,
+                                config.encoder_slave);
+    MultiTurnEncoderRTU* encoder_ptr = nullptr;
+    if (encoder.connect()) {
+        encoder_ptr = &encoder;
+        std::cout << "[提示] 编码器已连接，将一起参与共享内存预览。\n";
+    } else {
+        std::cout << "[警告] 编码器连接失败，本次共享内存预览将忽略编码器相关字段。\n";
+    }
+
+    SharedMemoryBridgeState state{};
+    bool got_device_status = false;
+    bool got_trolley_offline = false;
+    bool got_crane_state = false;
+
+    const auto device_conn = SignalDeviceStatus.connect([&](ai_safety_common::DeviceStatus status) {
+        got_device_status = true;
+        print_shared_memory_preview(status);
+    });
+    const auto trolley_offline_conn =
+        SignalFaultInfo.connect([&](ai_safety_common::FaultInfo status) {
+            got_trolley_offline = true;
+            print_shared_memory_preview(status);
+        });
+    const auto crane_conn = SignalCraneState.connect([&](ai_safety_common::CraneState state_value) {
+        got_crane_state = true;
+        print_shared_memory_preview(state_value);
+    });
+    const auto alert_conn = SignalAlert.connect([&](ai_safety_common::AlertMessage& alert_message) {
+        alert_message.Enable3Alert = false;
+        alert_message.Enable7Alert = false;
+    });
+    const auto power_conn = SignalPowerButton.connect([&](std::uint8_t& power_command) { power_command = 0; });
+
+    exchange_shared_memory(config, trolley, hook, encoder_ptr, state);
+
+    device_conn.disconnect();
+    trolley_offline_conn.disconnect();
+    crane_conn.disconnect();
+    alert_conn.disconnect();
+    power_conn.disconnect();
+
+    if (encoder_ptr != nullptr) {
+        encoder.disconnect();
+    }
+    hook.disconnect();
+    trolley.disconnect();
+
+    bool ok = true;
+    ok &= expect_ok(got_device_status, "共享内存预览已生成 DeviceStatus");
+    ok &= expect_ok(got_trolley_offline, "共享内存预览已生成 FaultInfo");
+    ok &= expect_ok(got_crane_state, "共享内存预览已生成 CraneState");
     return ok;
 }
 
@@ -914,7 +1045,7 @@ void run_hook_menu(const ModbusConfig& config) {
             case 9: ok = hook_test_all(config); break;
             default: ok = false; break;
         }
-        std::cout << (ok ? "[INFO] Hook 菜单测试完成\n" : "[INFO] Hook 菜单测试失败\n");
+        std::cout << (ok ? "[提示] Hook 菜单测试完成\n" : "[提示] Hook 菜单测试失败\n");
     }
 }
 
@@ -955,7 +1086,7 @@ void run_trolley_menu(const ModbusConfig& config) {
             case 13: ok = trolley_test_all(config); break;
             default: ok = false; break;
         }
-        std::cout << (ok ? "[INFO] Trolley 菜单测试完成\n" : "[INFO] Trolley 菜单测试失败\n");
+        std::cout << (ok ? "[提示] Trolley 菜单测试完成\n" : "[提示] Trolley 菜单测试失败\n");
     }
 }
 
@@ -1000,7 +1131,7 @@ void run_encoder_menu(const ModbusConfig& config) {
             case 13: ok = encoder_test_all(config); break;
             default: ok = false; break;
         }
-        std::cout << (ok ? "[INFO] Encoder 菜单测试完成\n" : "[INFO] Encoder 菜单测试失败\n");
+        std::cout << (ok ? "[提示] Encoder 菜单测试完成\n" : "[提示] Encoder 菜单测试失败\n");
     }
 }
 
@@ -1009,7 +1140,7 @@ void run_all_devices_menu(const ModbusConfig& config) {
     ok &= hook_test_all(config);
     ok &= trolley_test_all(config);
     ok &= encoder_test_all(config);
-    std::cout << (ok ? "[INFO] 全部设备测试完成\n" : "[INFO] 全部设备测试存在失败\n");
+    std::cout << (ok ? "[提示] 全部设备测试完成\n" : "[提示] 全部设备测试存在失败\n");
 }
 
 }  // namespace
@@ -1033,6 +1164,7 @@ int main(int argc, char** argv) {
                 {"退出",
                  "查看当前配置",
                  "切换配置文件",
+                 "共享内存发送预览测试",
                  "HookWarning 功能测试",
                  "TrolleyControl 功能测试",
                  "MultiTurnEncoderRTU 功能测试",
@@ -1040,7 +1172,7 @@ int main(int argc, char** argv) {
 
             switch (choice) {
                 case 0:
-                    std::cout << "[INFO] 退出测试程序\n";
+                    std::cout << "[提示] 退出测试程序\n";
                     return EXIT_SUCCESS;
                 case 1:
                     print_config_summary(config, options.config_path);
@@ -1052,23 +1184,26 @@ int main(int argc, char** argv) {
                         if (load_config(new_path, new_config)) {
                             config = new_config;
                             options.config_path = new_path;
-                            std::cout << "[INFO] 配置文件切换成功\n";
+                            std::cout << "[提示] 配置文件切换成功\n";
                         } else {
-                            std::cout << "[WARN] 配置文件切换失败，保留原配置\n";
+                            std::cout << "[警告] 配置文件切换失败，保留原配置\n";
                         }
                     }
                     break;
                 }
                 case 3:
-                    run_hook_menu(config);
+                    shared_memory_preview_test(config);
                     break;
                 case 4:
-                    run_trolley_menu(config);
+                    run_hook_menu(config);
                     break;
                 case 5:
-                    run_encoder_menu(config);
+                    run_trolley_menu(config);
                     break;
                 case 6:
+                    run_encoder_menu(config);
+                    break;
+                case 7:
                     run_all_devices_menu(config);
                     break;
                 default:
@@ -1076,9 +1211,9 @@ int main(int argc, char** argv) {
             }
         }
     } catch (const std::exception& ex) {
-        std::cerr << "[FAIL] unhandled exception: " << ex.what() << '\n';
+        std::cerr << "[失败] 未处理异常: " << ex.what() << '\n';
     } catch (...) {
-        std::cerr << "[FAIL] unknown exception\n";
+        std::cerr << "[失败] 未知异常\n";
     }
     return EXIT_FAILURE;
 }

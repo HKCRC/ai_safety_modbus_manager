@@ -1,21 +1,21 @@
 {
     "crane_type": "flat",
     "x86_ip": "192.168.61.2",
-    "trolley_ip": "192.168.61.36",
+    "trolley_ip": "127.0.0.1",
     "cab_bridge_ip": "192.168.61.67",
     "trolley_bridge_ip": "192.168.61.62",
 
-    "trolley_port": 502,
+    "trolley_port": 5020,
     "trolley_slave": 1,
 
-    "hook_dev": "/dev/ttyS0",
+    "hook_dev": "/dev/ttyUSB0",
     "hook_baud": 9600,
     "hook_parity": "N",
     "hook_data_bit": 8,
     "hook_stop_bit": 1,
-    "hook_slave": 3,
+    "hook_slave": 1,
 
-    "encoder_dev": "/dev/ttyS1",
+    "encoder_dev": "/dev/ttyUSB1",
     "encoder_baud": 9600,
     "encoder_parity": "E",
     "encoder_data_bit": 8,

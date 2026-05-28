@@ -18,6 +18,7 @@ struct SharedMemoryBridgeState {
 };
 
 inline boost::signals2::signal<void(ai_safety_common::DeviceStatus)> SignalDeviceStatus;
+inline boost::signals2::signal<void(ai_safety_common::FaultInfo)> SignalFaultInfo;
 inline boost::signals2::signal<void(ai_safety_common::CraneState)> SignalCraneState;
 inline boost::signals2::signal<void(ai_safety_common::AlertMessage&)> SignalAlert;
 inline boost::signals2::signal<void(std::uint8_t&)> SignalPowerButton;

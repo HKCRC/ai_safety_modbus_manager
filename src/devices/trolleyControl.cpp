@@ -59,6 +59,10 @@ bool TrolleyControl::setStandbyPowerMode(std::uint8_t value) {
     return writeOnOff(COIL_CTRL_STANDBY_POWER_MODE, value);
 }
 
+bool TrolleyControl::setSleepMode(std::uint8_t value) {
+    return writeOnOff(COIL_CTRL_SLEEP_MODE, value);
+}
+
 bool TrolleyControl::setWorkMode(uint16_t mode) {
     return writeRegister(HREG_WORK_MODE, mode);
 }
@@ -76,32 +80,26 @@ bool TrolleyControl::setShutdownTime(uint16_t value) {
 }
 
 bool TrolleyControl::readStatus(TrolleyStatus& out) {
-    uint8_t bits[12] = {0};
-    if (!readCoils(COIL_STATUS_3V3, 12, bits)) {
+    uint8_t bits[13] = {0}; // 增加读取的线圈数量，包括了休眠模式状态 (28)
+    if (!readCoils(COIL_STATUS_3V3, 13, bits)) {
         return false;
     }
 
-    out.power_3v3_on = to_flag(bits[0] == 0);
-    out.power_5v_on = to_flag(bits[1] == 0);
-    out.power_cctv_on = to_flag(bits[2] == 0);
-    out.power_4g_on = to_flag(bits[3] == 0);
     out.standby_mode_active = to_flag(bits[4] != 0);
     out.bms_charging = to_flag(bits[5] != 0);
     out.bridge_ping_ok = to_flag(bits[6] == 0);
-    out.battery_bms_read_ok = to_flag(bits[7] == 0);
+    out.bms_read_ok = to_flag(bits[7] == 0);
     out.mppt_read_ok = to_flag(bits[8] == 0);
     out.laser_1_read_ok = to_flag(bits[9] == 0);
     out.laser_2_read_ok = to_flag(bits[10] == 0);
     out.cctv_ping_ok = to_flag(bits[11] == 0);
+    out.sleep_mode_active = to_flag(bits[12] != 0);
 
     uint16_t system_regs[4] = {0};
     if (readInputRegisters(IREG_SYSTEM_VERSION_HIGH, 4, system_regs)) {
-        out.system_version =
-            (static_cast<uint32_t>(system_regs[0]) << 16) | static_cast<uint32_t>(system_regs[1]);
         out.system_error_code =
             (static_cast<uint32_t>(system_regs[2]) << 16) | static_cast<uint32_t>(system_regs[3]);
     } else {
-        out.system_version = 0;
         out.system_error_code = 0;
     }
 
@@ -109,17 +107,10 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
     if (!readHoldingRegisters(HREG_WORK_MODE, 7, holding)) {
         return false;
     }
-    out.work_mode = holding[0];
-    out.rtc_sys_time_diff = holding[1];
-    out.rtc_hour = holding[2];
-    out.rtc_minute = holding[3];
-    out.startup_time = holding[4];
-    out.shutdown_time = holding[5];
     out.device_status = holding[6];
 
     uint16_t batt_regs[6] = {0};
     if (readInputRegisters(IREG_BATTERY_VERSION, 6, batt_regs)) {
-        out.battery_version = batt_regs[0];
         out.battery_level = percent_from_10000(batt_regs[1]);
         out.discharge_time_valid = to_flag(batt_regs[2] != 0xFFFFu);
         out.discharge_time_min = out.discharge_time_valid ? batt_regs[2] : 0;
@@ -128,7 +119,6 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
         out.battery_voltage_v = static_cast<float>(batt_regs[4]) * 0.01f;
         out.battery_current_a = static_cast<float>(batt_regs[5]) * 0.01f;
     } else {
-        out.battery_version = 0;
         out.battery_level = 0;
         out.discharge_time_valid = 0;
         out.discharge_time_min = 0;
@@ -143,16 +133,13 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
         out.mppt_charge_status = mppt_status;
     } else {
         out.mppt_charge_status = 3;
-        out.mppt_read_ok = 0;
     }
 
-    uint16_t laser_regs[3] = {0};
-    if (readInputRegisters(IREG_LASER_DISTANCE_1, 3, laser_regs)) {
-        out.laser_distance = {laser_regs[0], laser_regs[1], laser_regs[2]};
+    uint16_t laser_regs[2] = {0};
+    if (readInputRegisters(IREG_LASER_DISTANCE_1, 2, laser_regs)) {
+        out.laser_distance = {laser_regs[0], laser_regs[1]};
     } else {
-        out.laser_distance = {0, 0, 0};
-        out.laser_1_read_ok = 0;
-        out.laser_2_read_ok = 0;
+        out.laser_distance = {0, 0};
     }
 
     return true;
