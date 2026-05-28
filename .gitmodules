@@ -1,0 +1,6 @@
+[submodule "third_party_libraries/libmodbus"]
+	path = third_party_libraries/libmodbus
+	url = https://github.com/stephane/libmodbus.git
+[submodule "third_party_libraries/ai_safety_common"]
+	path = third_party_libraries/ai_safety_common
+	url = https://github.com/HKCRC/ai_safety_common.git
