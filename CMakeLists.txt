@@ -33,19 +33,22 @@ if(NOT jsoncpp_FOUND)
     endif()
 endif()
 
+# ================= 修改点 1：给源文件路径加上 /src =================
 set(MODBUS_MANAGER_LIBMODBUS_SOURCES
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-data.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-rtu.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-tcp.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-data.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-rtu.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-tcp.c
 )
 
 add_library(modbus_vendor STATIC ${MODBUS_MANAGER_LIBMODBUS_SOURCES})
 add_library(modbus_vendor::modbus_vendor ALIAS modbus_vendor)
 
+# ================= 修改点 2：给 vendor 包含路径加上 /src =================
 target_include_directories(modbus_vendor
     PUBLIC
-        ${MODBUS_MANAGER_LIBMODBUS_DIR}
+        ${MODBUS_MANAGER_LIBMODBUS_DIR}    
+        ${MODBUS_MANAGER_LIBMODBUS_DIR}/src
 )
 
 set(MODBUS_MANAGER_SOURCES
@@ -66,11 +69,13 @@ endif()
 
 add_library(ai_safety_modbus_manager::ai_safety_modbus_manager ALIAS ai_safety_modbus_manager)
 
+# ================= 修改点 3：给主程序包含路径加上 /src =================
 target_include_directories(ai_safety_modbus_manager
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${MODBUS_MANAGER_AI_SAFETY_COMMON_INCLUDE_DIR}
         ${MODBUS_MANAGER_LIBMODBUS_DIR}
+        ${MODBUS_MANAGER_LIBMODBUS_DIR}/src
         ${MODBUS_MANAGER_EXTERNAL_INCLUDE_DIRS}
 )
 

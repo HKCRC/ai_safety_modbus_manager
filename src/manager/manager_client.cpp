@@ -24,10 +24,10 @@ struct ModbusManagerClient::Impl {
 
     std::thread worker;
     std::atomic<bool> running{false};
-    SharedMemoryBridgeState shared_memory_state{};
+    SharedMemoryBridge bridge{};
 
     void publish_once() {
-        exchange_shared_memory(config, *trolley, *hook, encoder.get(), shared_memory_state);
+        bridge.exchange_shared_memory(config, *trolley, *hook, encoder.get());
     }
 };
 

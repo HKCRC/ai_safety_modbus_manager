@@ -957,31 +957,31 @@ bool shared_memory_preview_test(const ModbusConfig& config) {
         std::cout << "[警告] 编码器连接失败，本次共享内存预览将忽略编码器相关字段。\n";
     }
 
-    SharedMemoryBridgeState state{};
+    SharedMemoryBridge bridge{};
     bool got_device_status = false;
     bool got_trolley_offline = false;
     bool got_crane_state = false;
 
-    const auto device_conn = SignalDeviceStatus.connect([&](ai_safety_common::DeviceStatus status) {
+    const auto device_conn = bridge.getSignalDeviceStatus().connect([&](ai_safety_common::DeviceStatus status) {
         got_device_status = true;
         print_shared_memory_preview(status);
     });
     const auto trolley_offline_conn =
-        SignalFaultInfo.connect([&](ai_safety_common::FaultInfo status) {
+        bridge.getSignalFaultInfo().connect([&](ai_safety_common::FaultInfo status) {
             got_trolley_offline = true;
             print_shared_memory_preview(status);
         });
-    const auto crane_conn = SignalCraneState.connect([&](ai_safety_common::CraneState state_value) {
+    const auto crane_conn = bridge.getSignalCraneState().connect([&](ai_safety_common::CraneState state_value) {
         got_crane_state = true;
         print_shared_memory_preview(state_value);
     });
-    const auto alert_conn = SignalAlert.connect([&](ai_safety_common::AlertMessage& alert_message) {
+    const auto alert_conn = bridge.getSignalAlert().connect([&](ai_safety_common::AlertMessage& alert_message) {
         alert_message.Enable3Alert = false;
         alert_message.Enable7Alert = false;
     });
-    const auto power_conn = SignalPowerButton.connect([&](std::uint8_t& power_command) { power_command = 0; });
+    const auto power_conn = bridge.getSignalPowerButton().connect([&](std::uint8_t& power_command) { power_command = 0; });
 
-    exchange_shared_memory(config, trolley, hook, encoder_ptr, state);
+    bridge.exchange_shared_memory(config, trolley, hook, encoder_ptr);
 
     device_conn.disconnect();
     trolley_offline_conn.disconnect();

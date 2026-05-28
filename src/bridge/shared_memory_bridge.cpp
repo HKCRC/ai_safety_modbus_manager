@@ -11,23 +11,21 @@
 #include "devices/multi_turn_encoder_rtu.h"
 #include "devices/trolleyControl.h"
 
-namespace {
-
-double now_seconds() {
+double SharedMemoryBridge::now_seconds() {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::duration<double>>(now).count();
 }
 
-double deg_to_rad(double deg) {
+double SharedMemoryBridge::deg_to_rad(double deg) {
     constexpr double kPi = 3.14159265358979323846;
     return deg * kPi / 180.0;
 }
 
-float cos_deg(float deg) {
+float SharedMemoryBridge::cos_deg(float deg) {
     return static_cast<float>(std::cos(deg_to_rad(static_cast<double>(deg))));
 }
 
-bool is_ipv4_literal(const std::string& ip) {
+bool SharedMemoryBridge::is_ipv4_literal(const std::string& ip) {
     if (ip.empty()) {
         return false;
     }
@@ -39,7 +37,7 @@ bool is_ipv4_literal(const std::string& ip) {
     return true;
 }
 
-bool ping_ipv4_once(const std::string& ip) {
+bool SharedMemoryBridge::ping_ipv4_once(const std::string& ip) {
     if (!is_ipv4_literal(ip)) {
         return false;
     }
@@ -47,7 +45,8 @@ bool ping_ipv4_once(const std::string& ip) {
     return std::system(cmd.c_str()) == 0;
 }
 
-ai_safety_common::DeviceStatus::SolarChargeState solar_charge_from_mppt(std::uint16_t mppt_status, bool mppt_ok) {
+ai_safety_common::DeviceStatus::SolarChargeState SharedMemoryBridge::solar_charge_from_mppt(
+    std::uint16_t mppt_status, bool mppt_ok) {
     if (!mppt_ok) {
         return ai_safety_common::DeviceStatus::SolarChargeState::Fault;
     }
@@ -63,7 +62,8 @@ ai_safety_common::DeviceStatus::SolarChargeState solar_charge_from_mppt(std::uin
     }
 }
 
-ai_safety_common::DeviceStatus::EquipmentState trolley_state_from(const TrolleyStatus& status, bool trolley_ok) {
+ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::trolley_state_from(
+    const TrolleyStatus& status, bool trolley_ok) {
     if (!trolley_ok) {
         return ai_safety_common::DeviceStatus::EquipmentState::Offline;
     }
@@ -79,9 +79,8 @@ ai_safety_common::DeviceStatus::EquipmentState trolley_state_from(const TrolleyS
     return ai_safety_common::DeviceStatus::EquipmentState::Unknown;
 }
 
-ai_safety_common::DeviceStatus::EquipmentState hook_state_from(bool hook_ok,
-                                                               std::uint16_t workmode,
-                                                               std::uint16_t error_code) {
+ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::hook_state_from(
+    bool hook_ok, std::uint16_t workmode, std::uint16_t error_code) {
     if (!hook_ok) {
         return ai_safety_common::DeviceStatus::EquipmentState::Offline;
     }
@@ -94,13 +93,10 @@ ai_safety_common::DeviceStatus::EquipmentState hook_state_from(bool hook_ok,
     return ai_safety_common::DeviceStatus::EquipmentState::Active;
 }
 
-} // namespace
-
-void exchange_shared_memory(const ModbusConfig& config,
-                            TrolleyControl& trolley,
-                            HookWarning& hook,
-                            MultiTurnEncoderRTU* encoder,
-                            SharedMemoryBridgeState& state) {
+void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
+                                                TrolleyControl& trolley,
+                                                HookWarning& hook,
+                                                MultiTurnEncoderRTU* encoder) {
     const double timestamp_seconds = now_seconds();
 
     TrolleyStatus trolley_status{};
@@ -120,7 +116,6 @@ void exchange_shared_memory(const ModbusConfig& config,
             fault_info.category = ai_safety_common::FaultInfo::Category::TrolleyStm32Fault;
         }
     } else {
-        // 小车在线，检查具体硬件通讯状态
         if (!trolley_status.bms_read_ok) {
             fault_info.category = ai_safety_common::FaultInfo::Category::BmsCommunicationFault;
         } else if (!trolley_status.mppt_read_ok) {
@@ -131,7 +126,7 @@ void exchange_shared_memory(const ModbusConfig& config,
             fault_info.category = ai_safety_common::FaultInfo::Category::CctvCommunicationFault;
         }
     }
-    SignalFaultInfo(fault_info);
+    signal_fault_info_(fault_info);
 
     // ============================================================
     // 2. DeviceStatus — 设备总体状态
@@ -177,7 +172,7 @@ void exchange_shared_memory(const ModbusConfig& config,
     device_status.hookBattery.voltageV = hook_ok ? hook.getVoltage() : 0.0f;
     device_status.hookBattery.currentA = hook_ok ? hook.getCurrent() : 0.0f;
 
-    SignalDeviceStatus(device_status);
+    signal_device_status_(device_status);
 
     // ============================================================
     // 3. CraneState — 距离信息
@@ -189,7 +184,6 @@ void exchange_shared_memory(const ModbusConfig& config,
     if (encoder != nullptr) {
         int32_t encoder_position = 0;
         if (encoder->readEncoderPosition(encoder_position)) {
-            // 线性关系: y = k * x + b
             crane_state.hookToTrolleyDistanceM =
                 config.encoder_k * static_cast<float>(encoder_position) + config.encoder_b;
         }
@@ -211,54 +205,44 @@ void exchange_shared_memory(const ModbusConfig& config,
         crane_state.groundToTrolleyDistanceM = std::max(corrected_height_1_m, corrected_height_2_m);
     }
 
-    // 将以上两个数据整合到struct，再通过signal写入共享内存
-    SignalCraneState(crane_state);
+    signal_crane_state_(crane_state);
 
     // ============================================================
     // 4. AlertMessage — 报警控制
     // ============================================================
-    ai_safety_common::AlertMessage alert_message; // 变量声明
-    SignalAlert(alert_message); // 这一步之后，alert_message会被填充成最新信息
+    ai_safety_common::AlertMessage alert_message;
+    signal_alert_(alert_message);
 
-    // d. 如果Enable3Alert是false，则跳过3m相关警报
     if (alert_message.Enable3Alert) {
-        // a. 如果Enable3Alert和Alert3M都是true，则需要向吊钩stm发送3m声音警报和闪灯警报
-        if (alert_message.Alert3M != state.last_alert_3) {
+        if (alert_message.Alert3M != last_alert_3_) {
             hook.slot_warning(alert_message.Alert3M ? 1 : -1);
-            state.last_alert_3 = alert_message.Alert3M;
+            last_alert_3_ = alert_message.Alert3M;
         }
     }
 
-    // e. 如果Enable7Alert是false，则跳过7m相关警报
     if (alert_message.Enable7Alert) {
-        // b. 如果Enable7Alert和Alert7M都是true，则需要向吊钩stm发送7m声音警报和闪灯警报
-        // c. 3m和7m有可能同时存在，可以同时发 (通过分别调用slot_warning实现)
-        if (alert_message.Alert7M != state.last_alert_7) {
+        if (alert_message.Alert7M != last_alert_7_) {
             hook.slot_warning(alert_message.Alert7M ? 2 : -2);
-            state.last_alert_7 = alert_message.Alert7M;
+            last_alert_7_ = alert_message.Alert7M;
         }
     }
 
     // ============================================================
     // 5. PowerButton — 电源控制
     // ============================================================
-    std::uint8_t power_command = 0; // 变量声明
-    SignalPowerButton(power_command); // 这一步之后，power_command会被填充成最新信息
+    std::uint8_t power_command = 0;
+    signal_power_button_(power_command);
 
     if (trolley_ok) {
-        // a. 对比这次读到的和上次读到的数据，检查是否发生变化
-        if (power_command != state.last_power_command) {
-            // b. 如果发生变化且最新数据是1，则翻译成打开设备电源（CCTV、激光测距）的modbus tcp指令发给小车stm32
+        if (power_command != last_power_command_) {
             if (power_command == 1u) {
-                trolley.setPower3v3(1u);   // 激光测距电源
-                trolley.setPowerCctv(1u);  // CCTV电源
-            } 
-            // c. 如果发生变化且最新数据是2，则翻译成关闭设备电源（CCTV、激光测距）的modbus tcp指令发给小车stm32
-            else if (power_command == 2u) {
+                trolley.setPower3v3(1u);
+                trolley.setPowerCctv(1u);
+            } else if (power_command == 2u) {
                 trolley.setPowerCctv(0u);
                 trolley.setPower3v3(0u);
             }
-            state.last_power_command = power_command;
+            last_power_command_ = power_command;
         }
     }
 }
