@@ -11,7 +11,7 @@ option(MODBUS_MANAGER_BUILD_TESTS "Build tests" ON)
 option(MODBUS_MANAGER_REGISTER_HARDWARE_TESTS "Register hardware-dependent tests in CTest" OFF)
 
 set(MODBUS_MANAGER_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party_libraries")
-set(MODBUS_MANAGER_LIBMODBUS_DIR "${MODBUS_MANAGER_THIRD_PARTY_DIR}/libmodbus")
+set(MODBUS_MANAGER_LIBMODBUS_DIR "${MODBUS_MANAGER_THIRD_PARTY_DIR}/modbus_devices/third_party_libraries/libmodbus")
 set(MODBUS_MANAGER_AI_SAFETY_COMMON_INCLUDE_DIR
     "${MODBUS_MANAGER_THIRD_PARTY_DIR}/ai_safety_common/include")
 
@@ -35,10 +35,10 @@ endif()
 
 # ================= 修改点 1：给源文件路径加上 /src =================
 set(MODBUS_MANAGER_LIBMODBUS_SOURCES
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-data.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-rtu.c
-    ${MODBUS_MANAGER_LIBMODBUS_DIR}/src/modbus-tcp.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-data.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-rtu.c
+    ${MODBUS_MANAGER_LIBMODBUS_DIR}/modbus-tcp.c
 )
 
 add_library(modbus_vendor STATIC ${MODBUS_MANAGER_LIBMODBUS_SOURCES})
@@ -73,6 +73,7 @@ add_library(ai_safety_modbus_manager::ai_safety_modbus_manager ALIAS ai_safety_m
 target_include_directories(ai_safety_modbus_manager
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/ai_safety_modbus_manager
         ${MODBUS_MANAGER_AI_SAFETY_COMMON_INCLUDE_DIR}
         ${MODBUS_MANAGER_LIBMODBUS_DIR}
         ${MODBUS_MANAGER_LIBMODBUS_DIR}/src
