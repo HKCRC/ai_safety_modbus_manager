@@ -117,3 +117,42 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
     impl_->trolley.reset();
     return {};
 }
+boost::signals2::connection ModbusManagerClient::connectDeviceStatus(
+    const std::function<void(ai_safety_common::DeviceStatus)>& slot) {
+    if (impl_) {
+        return impl_->bridge.getSignalDeviceStatus().connect(slot);
+    }
+    return {};
+}
+
+boost::signals2::connection ModbusManagerClient::connectFaultInfo(
+    const std::function<void(ai_safety_common::FaultInfo)>& slot) {
+    if (impl_) {
+        return impl_->bridge.getSignalFaultInfo().connect(slot);
+    }
+    return {};
+}
+
+boost::signals2::connection ModbusManagerClient::connectCraneState(
+    const std::function<void(ai_safety_common::CraneState)>& slot) {
+    if (impl_) {
+        return impl_->bridge.getSignalCraneState().connect(slot);
+    }
+    return {};
+}
+
+boost::signals2::connection ModbusManagerClient::connectAlert(
+    const std::function<void(ai_safety_common::AlertMessage&)>& slot) {
+    if (impl_) {
+        return impl_->bridge.getSignalAlert().connect(slot);
+    }
+    return {};
+}
+
+boost::signals2::connection ModbusManagerClient::connectPowerButton(
+    const std::function<void(std::uint8_t&)>& slot) {
+    if (impl_) {
+        return impl_->bridge.getSignalPowerButton().connect(slot);
+    }
+    return {};
+}

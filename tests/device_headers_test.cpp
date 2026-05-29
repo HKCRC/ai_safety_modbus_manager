@@ -51,12 +51,16 @@ std::string to_text(ai_safety_common::DeviceStatus::EquipmentState value) {
 
 std::string to_text(ai_safety_common::FaultInfo::Category value) {
     switch (value) {
-        case ai_safety_common::FaultInfo::Category::None: return "None";
+        case ai_safety_common::FaultInfo::Category::Unknown: return "Unknown";
         case ai_safety_common::FaultInfo::Category::CabBridgeFault: return "CabBridgeFault";
         case ai_safety_common::FaultInfo::Category::TrolleyBridgeFault: return "TrolleyBridgeFault";
         case ai_safety_common::FaultInfo::Category::TrolleyStm32Fault: return "TrolleyStm32Fault";
+        case ai_safety_common::FaultInfo::Category::BmsCommunicationFault: return "BmsCommunicationFault";
+        case ai_safety_common::FaultInfo::Category::MpptCommunicationFault: return "MpptCommunicationFault";
+        case ai_safety_common::FaultInfo::Category::LaserCommunicationFault: return "LaserCommunicationFault";
+        case ai_safety_common::FaultInfo::Category::CctvCommunicationFault: return "CctvCommunicationFault";
     }
-    return "None";
+    return "Unknown";
 }
 
 void print_shared_memory_preview(const ai_safety_common::DeviceStatus& status) {

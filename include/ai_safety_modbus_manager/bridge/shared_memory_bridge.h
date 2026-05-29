@@ -7,6 +7,7 @@
 #include "ai_safety_common/shared_memory_types.hpp"
 
 struct ModbusConfig;
+struct TrolleyStatus;
 class TrolleyControl;
 class HookWarning;
 class MultiTurnEncoderRTU;
