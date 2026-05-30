@@ -3,10 +3,12 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <exception>
 #include <thread>
 #include <utility>
 
-#include "devices/hookWarning.h"
+#include "devices/hookWarning/hookWarning.h"
+#include "devices/hookWarning/hookWarning_mqtt.h"
 #include "config/modbus_config.h"
 #include "devices/multi_turn_encoder_rtu.h"
 #include "bridge/shared_memory_bridge.h"
@@ -21,6 +23,7 @@ struct ModbusManagerClient::Impl {
     std::unique_ptr<TrolleyControl> trolley;
     std::unique_ptr<HookWarning> hook;
     std::unique_ptr<MultiTurnEncoderRTU> encoder;
+    std::unique_ptr<HookWarningServer> hook_mqtt;
 
     std::thread worker;
     std::atomic<bool> running{false};
@@ -83,6 +86,13 @@ ModbusManagerClient::Status ModbusManagerClient::init() {
         std::cerr << "[WARNING] encoder connect failed, continuing without encoder." << std::endl;
     }
 
+    if (!impl_->config.hook_mqtt_device_id.empty()) {
+        const Status hook_mqtt_status = initHookMqtt(impl_->config.hook_mqtt_device_id);
+        if (!hook_mqtt_status.ok) {
+            return hook_mqtt_status;
+        }
+    }
+
     return {};
 }
 
@@ -115,6 +125,102 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
     impl_->encoder.reset();
     impl_->hook.reset();
     impl_->trolley.reset();
+    impl_->hook_mqtt.reset();
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::initHookMqtt(const std::string& device_id) {
+    if (device_id.empty()) {
+        return {false, "hook mqtt device_id is empty"};
+    }
+    if (!impl_) {
+        impl_ = std::make_unique<Impl>();
+    }
+
+    try {
+        impl_->hook_mqtt = std::make_unique<HookWarningServer>(device_id);
+    } catch (const std::exception& ex) {
+        impl_->hook_mqtt.reset();
+        return {false, std::string("failed to init hook mqtt: ") + ex.what()};
+    } catch (...) {
+        impl_->hook_mqtt.reset();
+        return {false, "failed to init hook mqtt"};
+    }
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::resetHookMqtt() {
+    if (!impl_) {
+        return {};
+    }
+    impl_->hook_mqtt.reset();
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::setHookMqttFlashLight(
+    bool light_on, bool sound_7m, bool sound_3m, std::uint8_t volume) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    impl_->hook_mqtt->set_flash_light(light_on, sound_7m, sound_3m, volume);
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::setHookMqttSysMode(
+    bool is_standby, std::uint8_t work_mode) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    impl_->hook_mqtt->set_sys_mode(is_standby, work_mode);
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::setHookMqttTimeSchedule(
+    std::uint8_t off_hour,
+    std::uint8_t off_minute,
+    std::uint8_t on_hour,
+    std::uint8_t on_minute) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    if (off_hour > 23 || on_hour > 23 || off_minute > 59 || on_minute > 59) {
+        return {false, "invalid hook mqtt schedule time"};
+    }
+    impl_->hook_mqtt->set_time_schedule(off_hour, off_minute, on_hour, on_minute);
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::getHookMqttBmsStatus(BmsStatusData& status) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    status = impl_->hook_mqtt->get_bms_status();
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::getHookMqttLightStatus(
+    FlashLightStatusData& status) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    status = impl_->hook_mqtt->get_light_status();
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::getHookMqttSysStatus(SysStatusData& status) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    status = impl_->hook_mqtt->get_sys_status();
+    return {};
+}
+
+ModbusManagerClient::Status ModbusManagerClient::getHookMqttScheduleStatus(
+    SysScheduleData& status) {
+    if (!impl_ || !impl_->hook_mqtt) {
+        return {false, "hook mqtt not initialized"};
+    }
+    status = impl_->hook_mqtt->get_schedule_status();
     return {};
 }
 boost::signals2::connection ModbusManagerClient::connectDeviceStatus(

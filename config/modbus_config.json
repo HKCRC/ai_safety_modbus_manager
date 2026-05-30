@@ -14,6 +14,7 @@
     "hook_data_bit": 8,
     "hook_stop_bit": 1,
     "hook_slave": 1,
+    "hook_mqtt_device_id": "ais001",
 
     "encoder_dev": "/dev/ttyUSB1",
     "encoder_baud": 9600,

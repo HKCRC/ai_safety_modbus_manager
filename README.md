@@ -1,2 +1,0 @@
-# ai_safety_modbus_manager
-ai_safety_modbus_manager

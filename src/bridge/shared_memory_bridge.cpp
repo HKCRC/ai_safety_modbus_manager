@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <string>
 
-#include "devices/hookWarning.h"
+#include "devices/hookWarning/hookWarning.h"
 #include "config/modbus_config.h"
 #include "devices/multi_turn_encoder_rtu.h"
 #include "devices/trolleyControl.h"

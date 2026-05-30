@@ -37,6 +37,9 @@ bool ModbusConfig::loadFromFile(const std::string& path) {
     if (root.isMember("hook_data_bit") && root["hook_data_bit"].isInt()) hook_data_bit = root["hook_data_bit"].asInt();
     if (root.isMember("hook_stop_bit") && root["hook_stop_bit"].isInt()) hook_stop_bit = root["hook_stop_bit"].asInt();
     if (root.isMember("hook_slave") && root["hook_slave"].isInt()) hook_slave = root["hook_slave"].asInt();
+    if (root.isMember("hook_mqtt_device_id") && root["hook_mqtt_device_id"].isString()) {
+        hook_mqtt_device_id = root["hook_mqtt_device_id"].asString();
+    }
 
     if (root.isMember("encoder_dev") && root["encoder_dev"].isString()) encoder_dev = root["encoder_dev"].asString();
     if (root.isMember("encoder_baud") && root["encoder_baud"].isInt()) encoder_baud = root["encoder_baud"].asInt();

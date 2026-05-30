@@ -13,10 +13,18 @@ option(MODBUS_MANAGER_REGISTER_HARDWARE_TESTS "Register hardware-dependent tests
 set(MODBUS_MANAGER_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party_libraries")
 set(MODBUS_MANAGER_LIBMODBUS_DIR "${MODBUS_MANAGER_THIRD_PARTY_DIR}/modbus_devices/third_party_libraries/libmodbus")
 set(MODBUS_MANAGER_AI_SAFETY_COMMON_INCLUDE_DIR
-    "${MODBUS_MANAGER_THIRD_PARTY_DIR}/ai_safety_common/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ai_safety_common/include")
+set(MODBUS_MANAGER_CRANE_LOG_INCLUDE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../crane_log/include")
 
 if(NOT TARGET ai_safety_common)
-    add_subdirectory(${MODBUS_MANAGER_THIRD_PARTY_DIR}/ai_safety_common)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ai_safety_common
+                     ${CMAKE_CURRENT_BINARY_DIR}/ai_safety_common)
+endif()
+
+if(NOT TARGET crane_log_client_lib)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../crane_log
+                     ${CMAKE_CURRENT_BINARY_DIR}/crane_log)
 endif()
 
 set(MODBUS_MANAGER_EXTERNAL_INCLUDE_DIRS ""
@@ -59,7 +67,8 @@ set(MODBUS_MANAGER_SOURCES
     src/bridge/shared_memory_bridge.cpp
     src/common/modbus_control.cpp
     src/config/modbus_config.cpp
-    src/devices/hookWarning.cpp
+    src/devices/hookWarning/hookWarning.cpp
+    src/devices/hookWarning/hookWarning_mqtt.cpp
     src/devices/multi_turn_encoder_rtu.cpp
     src/devices/trolleyControl.cpp
     src/manager/manager_client.cpp
@@ -79,6 +88,7 @@ target_include_directories(ai_safety_modbus_manager
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/include/ai_safety_modbus_manager
         ${MODBUS_MANAGER_AI_SAFETY_COMMON_INCLUDE_DIR}
+        ${MODBUS_MANAGER_CRANE_LOG_INCLUDE_DIR}
         ${MODBUS_MANAGER_LIBMODBUS_DIR}
         ${MODBUS_MANAGER_LIBMODBUS_DIR}/src
         ${MODBUS_MANAGER_EXTERNAL_INCLUDE_DIRS}
@@ -91,6 +101,7 @@ target_link_libraries(ai_safety_modbus_manager
         Threads::Threads
         modbus_vendor::modbus_vendor
         ai_safety_common
+        crane_log_client_lib
 )
 
 if(TARGET Boost::headers)

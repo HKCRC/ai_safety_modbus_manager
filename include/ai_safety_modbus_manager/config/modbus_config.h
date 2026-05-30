@@ -19,6 +19,7 @@ struct ModbusConfig {
     int hook_data_bit = 8;
     int hook_stop_bit = 1;
     int hook_slave = 3;
+    std::string hook_mqtt_device_id;
 
     std::string encoder_dev = "/dev/ttyS1";
     int encoder_baud = 9600;
