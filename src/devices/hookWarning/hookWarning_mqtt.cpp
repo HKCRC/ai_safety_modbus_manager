@@ -43,6 +43,7 @@ HookWarningServer::~HookWarningServer() {
 
 void HookWarningServer::init_mqtt() {
     mqtt_client_ = std::make_unique<CraneLogClient>("HookWarning");
+    mqtt_client_->enable_local_mqtt(false);
 
     auto inform_cb = [this](const std::string& topic, const std::string& payload) {
         this->on_topic_inform(topic, payload);

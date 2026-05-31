@@ -118,14 +118,29 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
     if (!impl_) {
         return {};
     }
+    
+    // 先标记为不在运行，这样 worker 线程就不会再继续循环
     impl_->running.store(false);
+    
+    // 断开所有 signal 绑定，防止 worker 线程最后一次执行或有延迟的 signal 触发
+    impl_->bridge.getSignalDeviceStatus().disconnect_all_slots();
+    impl_->bridge.getSignalFaultInfo().disconnect_all_slots();
+    impl_->bridge.getSignalCraneState().disconnect_all_slots();
+    impl_->bridge.getSignalAlert().disconnect_all_slots();
+    impl_->bridge.getSignalPowerButton().disconnect_all_slots();
+
     if (impl_->worker.joinable()) {
         impl_->worker.join();
     }
+    
+    // 按顺序释放资源
     impl_->encoder.reset();
     impl_->hook.reset();
     impl_->trolley.reset();
+    
+    // 最后释放 mqtt，避免 "disconnect attempt too soon" 等问题
     impl_->hook_mqtt.reset();
+    
     return {};
 }
 
@@ -223,6 +238,130 @@ ModbusManagerClient::Status ModbusManagerClient::getHookMqttScheduleStatus(
     status = impl_->hook_mqtt->get_schedule_status();
     return {};
 }
+
+// ==========================================
+// Trolley Control
+// ==========================================
+ModbusManagerClient::Status ModbusManagerClient::triggerTrolleyReboot() {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->triggerReboot();
+    return {ok, ok ? "" : "trolley triggerReboot failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyPower3v3(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setPower3v3(value);
+    return {ok, ok ? "" : "trolley setPower3v3 failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyPower5v(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setPower5v(value);
+    return {ok, ok ? "" : "trolley setPower5v failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyPowerCctv(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setPowerCctv(value);
+    return {ok, ok ? "" : "trolley setPowerCctv failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyPower4g(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setPower4g(value);
+    return {ok, ok ? "" : "trolley setPower4g failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyStandbyEnable(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setStandbyEnable(value);
+    return {ok, ok ? "" : "trolley setStandbyEnable failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyStandbyPowerMode(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setStandbyPowerMode(value);
+    return {ok, ok ? "" : "trolley setStandbyPowerMode failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleySleepMode(std::uint8_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setSleepMode(value);
+    return {ok, ok ? "" : "trolley setSleepMode failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyWorkMode(uint16_t mode) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setWorkMode(mode);
+    return {ok, ok ? "" : "trolley setWorkMode failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyRtcTime(uint16_t hour, uint16_t minute) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setRtcTime(hour, minute);
+    return {ok, ok ? "" : "trolley setRtcTime failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyStartupTime(uint16_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setStartupTime(value);
+    return {ok, ok ? "" : "trolley setStartupTime failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::setTrolleyShutdownTime(uint16_t value) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->setShutdownTime(value);
+    return {ok, ok ? "" : "trolley setShutdownTime failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::getTrolleyStatus(TrolleyStatus& out) {
+    if (!impl_ || !impl_->trolley) return {false, "trolley not initialized"};
+    bool ok = impl_->trolley->readStatus(out);
+    return {ok, ok ? "" : "trolley readStatus failed"};
+}
+
+// ==========================================
+// Encoder Control
+// ==========================================
+ModbusManagerClient::Status ModbusManagerClient::readEncoderPosition(int32_t& position) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->readEncoderPosition(position);
+    return {ok, ok ? "" : "encoder readEncoderPosition failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::readEncoderNumberOfTurns(double& totalTurns, double& time_buffer, double& duration_buffer) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->readEncoderNumberOfTurns(totalTurns, time_buffer, duration_buffer);
+    return {ok, ok ? "" : "encoder readEncoderNumberOfTurns failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::writeEncoderPosition(int32_t position) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->writeEncoderPosition(position);
+    return {ok, ok ? "" : "encoder writeEncoderPosition failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::readEncoderSettings(MultiTurnEncoderRTU::EncoderSettings& settings) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->readEncoderSettings(settings);
+    return {ok, ok ? "" : "encoder readEncoderSettings failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::writeEncoder485DeviceAddress(uint16_t address) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->write485DeviceAddress(address);
+    return {ok, ok ? "" : "encoder write485DeviceAddress failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::writeEncoderBaudRate(MultiTurnEncoderRTU::BaudRate baudRate) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->writeBaudRate(baudRate);
+    return {ok, ok ? "" : "encoder writeBaudRate failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::writeEncoderCountingDirection(MultiTurnEncoderRTU::CountingDirection direction) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->writeCountingDirection(direction);
+    return {ok, ok ? "" : "encoder writeCountingDirection failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::writeEncoderParityCheck(MultiTurnEncoderRTU::ParityCheck parityCheck) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    bool ok = impl_->encoder->writeParityCheck(parityCheck);
+    return {ok, ok ? "" : "encoder writeParityCheck failed"};
+}
+ModbusManagerClient::Status ModbusManagerClient::getEncoderSettingsString(MultiTurnEncoderRTU::EncoderSettingsString& settings_str) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    settings_str = impl_->encoder->getEncoderSettings();
+    return {};
+}
+ModbusManagerClient::Status ModbusManagerClient::getEncoderData(MultiTurnEncoderRTU::StampedEncoderData& data) {
+    if (!impl_ || !impl_->encoder) return {false, "encoder not initialized"};
+    data = impl_->encoder->getEncoderData();
+    return {};
+}
+
 boost::signals2::connection ModbusManagerClient::connectDeviceStatus(
     const std::function<void(ai_safety_common::DeviceStatus)>& slot) {
     if (impl_) {

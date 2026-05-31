@@ -9,7 +9,7 @@
 
 struct TrolleyStatus {
     // --- 1. 小车使用状态相关 ---
-    std::uint8_t standby_mode_active = 0;   // 1=standby active, 0=standby inactive
+    std::uint8_t power_saving_mode_active = 0; // 1=power saving active, 0=inactive
     std::uint8_t sleep_mode_active = 0;     // 1=sleep mode active, 0=normal mode
     uint16_t device_status = 0;             // 0=standby, 1=active, 2=error
     
@@ -56,7 +56,7 @@ public:
     static constexpr int COIL_STATUS_5V = 17;
     static constexpr int COIL_STATUS_CCTV = 18;
     static constexpr int COIL_STATUS_4G = 19;
-    static constexpr int COIL_STATUS_STANDBY_ACTIVE = 20;
+    static constexpr int COIL_STATUS_POWER_SAVING_MODE = 20;
     static constexpr int COIL_STATUS_BMS_CHARGING = 21;
     static constexpr int COIL_STATUS_BRIDGE_PING_FAIL = 22;
     static constexpr int COIL_STATUS_BMS_READ_FAIL = 23;

@@ -85,7 +85,7 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
         return false;
     }
 
-    out.standby_mode_active = to_flag(bits[4] != 0);
+    out.power_saving_mode_active = to_flag(bits[4] != 0);
     out.bms_charging = to_flag(bits[5] != 0);
     out.bridge_ping_ok = to_flag(bits[6] == 0);
     out.bms_read_ok = to_flag(bits[7] == 0);
