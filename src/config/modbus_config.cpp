@@ -42,6 +42,8 @@ bool ModbusConfig::loadFromFile(const std::string& path) {
     }
 
     if (root.isMember("encoder_dev") && root["encoder_dev"].isString()) encoder_dev = root["encoder_dev"].asString();
+    if (root.isMember("encoder_ip") && root["encoder_ip"].isString()) encoder_ip = root["encoder_ip"].asString();
+    if (root.isMember("encoder_port") && root["encoder_port"].isInt()) encoder_port = root["encoder_port"].asInt();
     if (root.isMember("encoder_baud") && root["encoder_baud"].isInt()) encoder_baud = root["encoder_baud"].asInt();
     if (root.isMember("encoder_parity") && root["encoder_parity"].isString()) {
         std::string p = root["encoder_parity"].asString();

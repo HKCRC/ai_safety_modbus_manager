@@ -25,6 +25,15 @@ public:
     Status start();
     Status stop();
 
+    Status initTrolley();
+    Status initEncoder();
+
+    void shutdownTrolley();
+    void shutdownEncoder();
+
+    bool hasTrolley() const;
+    bool hasEncoder() const;
+
     // Hook MQTT
     Status initHookMqtt(const std::string& device_id);
     Status resetHookMqtt();

@@ -25,7 +25,7 @@ public:
 
     void exchange_shared_memory(const ModbusConfig& config,
                                 TrolleyControl& trolley,
-                                HookWarning& hook,
+                                HookWarning* hook,
                                 MultiTurnEncoderRTU* encoder);
 
     SignalDeviceStatusType& getSignalDeviceStatus() { return signal_device_status_; }

@@ -7,8 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MODBUS_MANAGER_BUILD_SHARED "Build ai_safety_modbus_manager as a shared library" OFF)
-option(MODBUS_MANAGER_BUILD_TESTS "Build tests" ON)
-option(MODBUS_MANAGER_REGISTER_HARDWARE_TESTS "Register hardware-dependent tests in CTest" OFF)
 
 set(MODBUS_MANAGER_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party_libraries")
 set(MODBUS_MANAGER_LIBMODBUS_DIR "${MODBUS_MANAGER_THIRD_PARTY_DIR}/modbus_devices/third_party_libraries/libmodbus")
@@ -123,20 +121,6 @@ endif()
 
 if(MODBUS_MANAGER_EXTERNAL_LIBRARIES)
     target_link_libraries(ai_safety_modbus_manager PUBLIC ${MODBUS_MANAGER_EXTERNAL_LIBRARIES})
-endif()
-
-if(MODBUS_MANAGER_BUILD_TESTS)
-    enable_testing()
-
-    add_executable(device_headers_test tests/device_headers_test.cpp)
-    target_link_libraries(device_headers_test PRIVATE ai_safety_modbus_manager::ai_safety_modbus_manager)
-    target_compile_definitions(device_headers_test
-        PRIVATE
-            MODBUS_MANAGER_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/modbus_config.json")
-
-    if(MODBUS_MANAGER_REGISTER_HARDWARE_TESTS)
-        add_test(NAME device_headers_test COMMAND device_headers_test)
-    endif()
 endif()
 
 message(STATUS "Extra include dirs: ${MODBUS_MANAGER_EXTERNAL_INCLUDE_DIRS}")

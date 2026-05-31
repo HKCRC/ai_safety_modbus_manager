@@ -95,13 +95,13 @@ ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::hook_state_fr
 
 void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
                                                 TrolleyControl& trolley,
-                                                HookWarning& hook,
+                                                HookWarning* hook,
                                                 MultiTurnEncoderRTU* encoder) {
     const double timestamp_seconds = now_seconds();
 
     TrolleyStatus trolley_status{};
     const bool trolley_ok = trolley.readStatus(trolley_status);
-    const bool hook_ok = hook.refreshStatus();
+    const bool hook_ok = hook && hook->refreshStatus();
 
     // ============================================================
     // 1. FaultInfo — 异常信息
@@ -159,18 +159,22 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
                 : 0u;
     }
 
-    const std::uint16_t hook_workmode = hook.getWorkmode();
-    const std::uint16_t hook_error = hook.getErrorCode();
-    device_status.hookState = hook_state_from(hook_ok, hook_workmode, hook_error);
-    device_status.hookBattery.percent =
-        hook_ok ? static_cast<std::uint8_t>(hook.get_battery_level_feedback()) : 0u;
-    device_status.hookBattery.remainingMin =
-        hook_ok ? static_cast<std::uint32_t>(hook.getDischargeTime()) : 0u;
-    device_status.hookBattery.isCharging = hook_ok ? (hook.getChargingStatus() != 0u) : false;
-    device_status.hookBattery.chargingTimeMin =
-        hook_ok ? static_cast<std::uint32_t>(hook.getChargeTime()) : 0u;
-    device_status.hookBattery.voltageV = hook_ok ? hook.getVoltage() : 0.0f;
-    device_status.hookBattery.currentA = hook_ok ? hook.getCurrent() : 0.0f;
+    if (hook) {
+        const std::uint16_t hook_workmode = hook->getWorkmode();
+        const std::uint16_t hook_error = hook->getErrorCode();
+        device_status.hookState = hook_state_from(hook_ok, hook_workmode, hook_error);
+        device_status.hookBattery.percent =
+            hook_ok ? static_cast<std::uint8_t>(hook->get_battery_level_feedback()) : 0u;
+        device_status.hookBattery.remainingMin =
+            hook_ok ? static_cast<std::uint32_t>(hook->getDischargeTime()) : 0u;
+        device_status.hookBattery.isCharging = hook_ok ? (hook->getChargingStatus() != 0u) : false;
+        device_status.hookBattery.chargingTimeMin =
+            hook_ok ? static_cast<std::uint32_t>(hook->getChargeTime()) : 0u;
+        device_status.hookBattery.voltageV = hook_ok ? hook->getVoltage() : 0.0f;
+        device_status.hookBattery.currentA = hook_ok ? hook->getCurrent() : 0.0f;
+    } else {
+        device_status.hookState = ai_safety_common::DeviceStatus::EquipmentState::Offline;
+    }
 
     signal_device_status_(device_status);
 
@@ -213,17 +217,19 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     ai_safety_common::AlertMessage alert_message;
     signal_alert_(alert_message);
 
-    if (alert_message.Enable3Alert) {
-        if (alert_message.Alert3M != last_alert_3_) {
-            hook.slot_warning(alert_message.Alert3M ? 1 : -1);
-            last_alert_3_ = alert_message.Alert3M;
+    if (hook) {
+        if (alert_message.Enable3Alert) {
+            if (alert_message.Alert3M != last_alert_3_) {
+                hook->slot_warning(alert_message.Alert3M ? 1 : -1);
+                last_alert_3_ = alert_message.Alert3M;
+            }
         }
-    }
 
-    if (alert_message.Enable7Alert) {
-        if (alert_message.Alert7M != last_alert_7_) {
-            hook.slot_warning(alert_message.Alert7M ? 2 : -2);
-            last_alert_7_ = alert_message.Alert7M;
+        if (alert_message.Enable7Alert) {
+            if (alert_message.Alert7M != last_alert_7_) {
+                hook->slot_warning(alert_message.Alert7M ? 2 : -2);
+                last_alert_7_ = alert_message.Alert7M;
+            }
         }
     }
 

@@ -16,12 +16,14 @@
     "hook_slave": 1,
     "hook_mqtt_device_id": "ais001",
 
-    "encoder_dev": "/dev/ttyUSB1",
+    "encoder_dev": "",
+    "encoder_ip": "127.0.0.1",
+    "encoder_port": 5020,
     "encoder_baud": 9600,
     "encoder_parity": "E",
     "encoder_data_bit": 8,
     "encoder_stop_bit": 1,
-    "encoder_slave": 1,
+    "encoder_slave": 3,
 
     "laser_scale_m": 0.001,
     "laser1_tilt_deg": 4.0,

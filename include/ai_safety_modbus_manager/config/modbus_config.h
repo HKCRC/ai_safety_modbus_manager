@@ -22,6 +22,8 @@ struct ModbusConfig {
     std::string hook_mqtt_device_id;
 
     std::string encoder_dev = "/dev/ttyS1";
+    std::string encoder_ip;
+    int encoder_port = 502;
     int encoder_baud = 9600;
     char encoder_parity = 'E';
     int encoder_data_bit = 8;
