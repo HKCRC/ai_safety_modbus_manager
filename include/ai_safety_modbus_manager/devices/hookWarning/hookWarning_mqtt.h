@@ -42,13 +42,13 @@ struct BmsStatusData {
 };
 
 // 1.4 内容 ID = 0x04: 使能工作心跳 (数据长度 1)
-struct EnableHeartbeatData {
-    uint8_t enable; // 1-开启，0-关闭
+struct heart_beat_en_t {
+    uint8_t heartbeat_en; // 1-开启（默认），0-关闭
 };
 
-// 1.5 内容 ID = 0x05: 心跳包 (数据长度 2)
-struct HeartBeatData {
-    uint16_t heartbeat; 
+// 1.5 内容 ID = 0x05: 心跳包 (数据长度 1)
+struct heart_beat_t {
+    uint8_t heartbeat; 
 };
 
 // 1.6 内容 ID = 0x06: 工作模式 (数据长度 1)
@@ -111,11 +111,17 @@ public:
     CurrentTimeData get_current_time();
     uint8_t get_error_code();
 
+    void start();
+
+    // --- 连接状态 ---
+    bool is_connected() const;
+
 private:
     std::string device_id_;
 
     // --- MQTT 客户端 ---
-    std::unique_ptr<CraneLogClient> mqtt_client_;
+    std::mutex mqtt_mutex_;
+    std::unique_ptr<MqttClient> mqtt_client_;
 
     // --- MQTT 主题 ---
     std::string topic_cmd_;
@@ -123,19 +129,21 @@ private:
     std::string topic_heartbeat_;
 
     // --- 线程与控制 ---
-    std::atomic<bool> running_;   
-    std::thread poll_thread_;     
+    std::atomic<bool> running_{false};
+    std::atomic<bool> started_{false};
+    std::thread poll_thread_;
     std::thread heartbeat_thread_;
 
     // --- 状态变量 ---
     std::atomic<uint8_t> send_seq_num_;        
-    uint16_t current_heartbeat_ = 0;   
+    uint8_t current_heartbeat_ = 0;   
 
     // 保存从设备读取到的最新状态 (加锁保护)
     std::mutex data_mutex_;
+    std::chrono::steady_clock::time_point last_rx_time_;
     FlashLightCmdData latest_light_status_;
     BmsStatusData latest_bms_status_;
-    EnableHeartbeatData latest_heartbeat_enable_;
+    heart_beat_en_t latest_heartbeat_enable_;
     WorkModeData latest_work_mode_;
     EnableSleepModeData latest_sleep_mode_enable_;
     SleepScheduleData latest_sleep_schedule_;
@@ -158,8 +166,8 @@ private:
     bool verify_crc16(const uint8_t* data, size_t length, uint16_t received_crc);
 
     // 发送指令基础函数
-    void send_command(uint8_t content_id, const uint8_t* data, uint8_t data_len);
-    void send_inquiry(uint8_t content_id); 
+    bool send_command(uint8_t content_id, const uint8_t* data, uint8_t data_len);
+    bool send_inquiry(uint8_t content_id); 
     
     // 阻塞发送并等待应答辅助函数
     bool send_command_and_wait(uint8_t content_id, const uint8_t* data, uint8_t data_len, int timeout_ms = 2000);

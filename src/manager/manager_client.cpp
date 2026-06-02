@@ -96,7 +96,17 @@ struct ModbusManagerClient::Impl {
             return false;
         }
         try {
-            hook_mqtt = std::make_unique<HookWarningServer>(config.hook_mqtt_device_id);
+            std::cout << "[INFO] hook mqtt connecting as " << config.hook_mqtt_device_id << "..." << std::endl;
+            hook_mqtt = std::make_unique<HookWarningServer>(config.hook_mqtt_device_id); 
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000)); 
+            
+            if (hook_mqtt->is_connected()) {
+                std::cout << "[INFO] hook mqtt connected." << std::endl;
+            } else {
+                std::cout << "[INFO] hook mqtt disconnected." << std::endl;
+            }
+            // 无论是否 connected，模块对象都是初始化成功的，底层的重连机制会继续尝试
+            return true;
         } catch (const std::exception& ex) {
             hook_mqtt.reset();
             if (log_failure) {
@@ -111,8 +121,6 @@ struct ModbusManagerClient::Impl {
             }
             return false;
         }
-        std::cout << "[INFO] hook mqtt connected." << std::endl;
-        return true;
     }
 
     static bool should_retry(std::chrono::steady_clock::time_point& next_retry_at,
@@ -136,6 +144,9 @@ struct ModbusManagerClient::Impl {
         if (!hook_mqtt && !config.hook_mqtt_device_id.empty() &&
             should_retry(next_hook_mqtt_reconnect_at_, now)) {
             try_init_hook_mqtt();
+            if (hook_mqtt) {
+                hook_mqtt->start();
+            }
         }
     }
 
@@ -180,23 +191,9 @@ ModbusManagerClient::Status ModbusManagerClient::init() {
         return {false, "config not loaded"};
     }
 
-    int connected_devices = 0;
-
-    if (impl_->try_init_trolley()) {
-        connected_devices++;
-    }
-
-    if (impl_->try_init_encoder()) {
-        connected_devices++;
-    }
-
-    if (impl_->try_init_hook_mqtt()) {
-        connected_devices++;
-    }
-
-    if (connected_devices == 0) {
-        return {false, "all devices failed to connect"};
-    }
+    impl_->try_init_trolley();
+    impl_->try_init_encoder();
+    impl_->try_init_hook_mqtt();
 
     return {};
 }
@@ -245,6 +242,13 @@ ModbusManagerClient::Status ModbusManagerClient::start() {
     }
     if (impl_->polling_active_.exchange(true)) {
         return {false, "already running"};
+    }
+
+    if (!impl_->hook_mqtt) {
+        impl_->try_init_hook_mqtt();
+    }
+    if (impl_->hook_mqtt) {
+        impl_->hook_mqtt->start();
     }
 
     impl_->poll_thread_ = std::thread([this]() {

@@ -2,7 +2,8 @@
 #include <cstring>
 #include <iostream>
 #include <chrono>
-#include <arpa/inet.h> 
+#include <arpa/inet.h>
+#include <unistd.h>
 
 
 #define FRAME_HEADER_BYTE 0xA5
@@ -12,7 +13,6 @@
 // ==========================================
 HookWarningServer::HookWarningServer(const std::string& device_id)
     : device_id_(device_id),
-      running_(true),
       send_seq_num_(0),
       current_heartbeat_(0)
 {
@@ -30,30 +30,56 @@ HookWarningServer::HookWarningServer(const std::string& device_id)
     std::memset(&latest_sleep_schedule_, 0, sizeof(latest_sleep_schedule_));
     std::memset(&latest_current_time_, 0, sizeof(latest_current_time_));
     std::memset(&latest_error_code_, 0, sizeof(latest_error_code_));
+    last_rx_time_ = std::chrono::steady_clock::now();
 
     init_mqtt();
-
-    poll_thread_ = std::thread(&HookWarningServer::poll_task, this);
-    heartbeat_thread_ = std::thread(&HookWarningServer::heartbeat_task, this);
 
     std::cout << "[HookWarningServer] Initialized for device: " << device_id_ << std::endl;
 }
 
 HookWarningServer::~HookWarningServer() {
     running_ = false;
-    if (poll_thread_.joinable()) poll_thread_.join();
-    if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
+    if (started_.load()) {
+        if (poll_thread_.joinable()) poll_thread_.join();
+        if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
+    }
+}
+
+void HookWarningServer::start() {
+    if (started_.exchange(true)) {
+        return;
+    }
+    running_ = true;
+    poll_thread_ = std::thread(&HookWarningServer::poll_task, this);
+    heartbeat_thread_ = std::thread(&HookWarningServer::heartbeat_task, this);
 }
 
 void HookWarningServer::init_mqtt() {
-    mqtt_client_ = std::make_unique<CraneLogClient>("HookWarning");
-    mqtt_client_->enable_local_mqtt(false);
+    std::lock_guard<std::mutex> lock(mqtt_mutex_);
+
+    MqttConfig cloud_cfg;
+    cloud_cfg.host = "210.0.159.242";
+    cloud_cfg.port = 1883;
+    cloud_cfg.username = "hkcrctest";
+    cloud_cfg.password = "crcHK3130";
+
+    char hostname[256];
+    gethostname(hostname, sizeof(hostname));
+    cloud_cfg.client_id = std::string("crane_cloud_HookWarning_") + hostname + "/" + MqttClient::getLocalIP();
+
+    mqtt_client_ = std::make_unique<MqttClient>();
+    mqtt_client_->init(cloud_cfg);
 
     auto inform_cb = [this](const std::string& topic, const std::string& payload) {
         this->on_topic_inform(topic, payload);
     };
 
-    mqtt_client_->mqtt_cloud_subscribe(topic_inform_, inform_cb, 1);
+    mqtt_client_->subscribe(topic_inform_, inform_cb, 1);
+}
+
+bool HookWarningServer::is_connected() const {
+    if (!mqtt_client_) return false;
+    return mqtt_client_->connected();
 }
 
 void HookWarningServer::on_topic_inform(const std::string& topic, const std::string& payload) {
@@ -61,7 +87,12 @@ void HookWarningServer::on_topic_inform(const std::string& topic, const std::str
 }
 
 void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t* raw_data, size_t raw_length) {
-    if (raw_length < 6) return; // 至少: 帧头(4) + CRC(2)
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        last_rx_time_ = std::chrono::steady_clock::now();
+    }
+
+    if (raw_length < 6) return; // 帧头(4) + CRC(2)
     
     const HookMqttFrameHeader* header = reinterpret_cast<const HookMqttFrameHeader*>(raw_data);
     
@@ -130,8 +161,8 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
                 break;
             }
             case 0x04: { // 使能工作心跳
-                if (header->data_len == sizeof(EnableHeartbeatData)) {
-                    std::memcpy(&latest_heartbeat_enable_, data_ptr, sizeof(EnableHeartbeatData));
+                if (header->data_len == sizeof(heart_beat_en_t)) {
+                    std::memcpy(&latest_heartbeat_enable_, data_ptr, sizeof(heart_beat_en_t));
                 }
                 break;
             }
@@ -196,7 +227,10 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
 // ==========================================
 // 数据下发与发送封装
 // ==========================================
-void HookWarningServer::send_command(uint8_t content_id, const uint8_t* data, uint8_t data_len) {
+bool HookWarningServer::send_command(uint8_t content_id, const uint8_t* data, uint8_t data_len) {
+    std::lock_guard<std::mutex> lock(mqtt_mutex_);
+    if (!mqtt_client_) return false;
+
     size_t total_len = sizeof(HookMqttFrameHeader) + data_len + 2;
     std::vector<uint8_t> buffer(total_len, 0);
 
@@ -217,14 +251,14 @@ void HookWarningServer::send_command(uint8_t content_id, const uint8_t* data, ui
 
     std::string payload_str(reinterpret_cast<char*>(buffer.data()), total_len);
     if (content_id == 0x05) {
-        mqtt_client_->mqtt_publish(topic_heartbeat_, payload_str, 0, false);
+        return mqtt_client_->publish(topic_heartbeat_, payload_str, 0, false);
     } else {
-        mqtt_client_->mqtt_publish(topic_cmd_, payload_str, 2, false);
+        return mqtt_client_->publish(topic_cmd_, payload_str, 2, false);
     }
 }
 
-void HookWarningServer::send_inquiry(uint8_t content_id) {
-    send_command(content_id, nullptr, 0);
+bool HookWarningServer::send_inquiry(uint8_t content_id) {
+    return send_command(content_id, nullptr, 0);
 }
 
 bool HookWarningServer::send_command_and_wait(uint8_t content_id, const uint8_t* data, uint8_t data_len, int timeout_ms) {
@@ -265,11 +299,11 @@ bool HookWarningServer::set_flash_light(bool light_on, bool sound_7m, bool sound
 
 // 0x04 控制心跳使能
 bool HookWarningServer::set_heartbeat_enable(bool enable) {
-    EnableHeartbeatData cmd;
-    cmd.enable = enable ? 1 : 0;
+    heart_beat_en_t cmd;
+    cmd.heartbeat_en = enable ? 1 : 0;
 
     for (int i = 0; i < 3; ++i) {
-        if (send_command_and_wait(0x04, reinterpret_cast<const uint8_t*>(&cmd), sizeof(EnableHeartbeatData))) {
+        if (send_command_and_wait(0x04, reinterpret_cast<const uint8_t*>(&cmd), sizeof(heart_beat_en_t))) {
             return true;
         }
     }
@@ -324,34 +358,39 @@ bool HookWarningServer::set_current_time(uint8_t hour, uint8_t minute) {
 // 后台定时任务
 // ==========================================
 void HookWarningServer::poll_task() {
-    int counter_100ms = 0; // 用一个 100ms 为单位的计数器来管理不同任务的频率
-    
+    int counter_100ms = 0;
+    int consecutive_publish_failures = 0;
+
     while (running_) {
-      
-        if (counter_100ms % 20 == 0) {
-            send_inquiry(0x01); // 灯光与喇叭状态
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            send_inquiry(0x04);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            send_inquiry(0x06);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            send_inquiry(0x07);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            send_inquiry(0x08);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            send_inquiry(0x09);
-        }
-        
         // 电池状态 (0x02) 每 10 秒 (100 * 100ms) 查询一次
         if (counter_100ms % 100 == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 错开 100ms 防止粘包
-            send_inquiry(0x02);
+            bool ok = send_inquiry(0x02);
+            if (!ok) consecutive_publish_failures++; else consecutive_publish_failures = 0;
         }
 
-        // 每次循环睡 100ms，并把计数器加 1
+        std::chrono::steady_clock::time_point rx_time;
+        {
+            std::lock_guard<std::mutex> lock(data_mutex_);
+            rx_time = last_rx_time_;
+        }
+        auto now = std::chrono::steady_clock::now();
+        bool receive_timeout = std::chrono::duration_cast<std::chrono::seconds>(now - rx_time).count() > 15;
+
+        if (consecutive_publish_failures >= 5 || receive_timeout) {
+            std::cout << "[HookWarningServer] MQTT disconnected or deaf (timeout: "
+                      << receive_timeout << ", fails: " << consecutive_publish_failures
+                      << "), attempting to re-initialize..." << std::endl;
+            init_mqtt();
+            consecutive_publish_failures = 0;
+            {
+                std::lock_guard<std::mutex> lock(data_mutex_);
+                last_rx_time_ = std::chrono::steady_clock::now();
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         counter_100ms++;
-        
+
         if (counter_100ms >= 100) {
             counter_100ms = 0;
         }
@@ -360,10 +399,10 @@ void HookWarningServer::poll_task() {
 
 void HookWarningServer::heartbeat_task() {
     while (running_) {
-        HeartBeatData hb;
-        hb.heartbeat = htons(current_heartbeat_);
-        if (++current_heartbeat_ > 65535) current_heartbeat_ = 0;
-        send_command(0x05, reinterpret_cast<const uint8_t*>(&hb), sizeof(HeartBeatData));
+        heart_beat_t hb;
+        hb.heartbeat = current_heartbeat_;
+        if (++current_heartbeat_ > 255) current_heartbeat_ = 0;
+        send_command(0x05, reinterpret_cast<const uint8_t*>(&hb), sizeof(heart_beat_t));
         
         // 每 1 秒发送一次心跳 (10 * 100ms)
         for (int i = 0; i < 10 && running_; ++i) {
@@ -409,7 +448,7 @@ BmsStatusData HookWarningServer::get_bms_status() {
 
 bool HookWarningServer::get_heartbeat_enable() {
     std::lock_guard<std::mutex> lock(data_mutex_);
-    return latest_heartbeat_enable_.enable == 1;
+    return latest_heartbeat_enable_.heartbeat_en == 1;
 }
 
 uint8_t HookWarningServer::get_work_mode() {
