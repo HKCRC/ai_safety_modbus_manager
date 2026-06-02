@@ -37,19 +37,111 @@ struct ModbusManagerClient::Impl {
 
     ModbusConfig config{};
     bool config_loaded = false;
+    static constexpr auto kReconnectInterval = std::chrono::seconds(2);
 
     // ── 核心设备 ──
     std::unique_ptr<TrolleyControl> trolley;
-    std::unique_ptr<HookWarning> hook;
     std::unique_ptr<MultiTurnEncoderRTU> encoder;
 
     // ── 设备轮询线程 ──
     std::thread poll_thread_;
     std::atomic<bool> polling_active_{false};
+    std::chrono::steady_clock::time_point next_trolley_reconnect_at_{};
+    std::chrono::steady_clock::time_point next_encoder_reconnect_at_{};
+    std::chrono::steady_clock::time_point next_hook_mqtt_reconnect_at_{};
+
+    bool try_init_trolley(bool log_failure = true) {
+        trolley = std::make_unique<TrolleyControl>(config.trolley_ip,
+                                                   config.trolley_port,
+                                                   config.trolley_slave);
+        if (!trolley->connect()) {
+            trolley.reset();
+            if (log_failure) {
+                std::cerr << "[WARNING] trolley connect failed, continuing without trolley." << std::endl;
+            }
+            return false;
+        }
+        std::cout << "[INFO] trolley connected." << std::endl;
+        return true;
+    }
+
+
+
+    bool try_init_encoder(bool log_failure = true) {
+        if (!config.encoder_ip.empty()) {
+            encoder = std::make_unique<MultiTurnEncoderRTU>(config.encoder_ip.c_str(),
+                                                            config.encoder_port,
+                                                            config.encoder_slave);
+        } else {
+            encoder = std::make_unique<MultiTurnEncoderRTU>(config.encoder_dev.c_str(),
+                                                            config.encoder_baud,
+                                                            config.encoder_parity,
+                                                            config.encoder_data_bit,
+                                                            config.encoder_stop_bit,
+                                                            config.encoder_slave);
+        }
+        if (!encoder->connect()) {
+            encoder.reset();
+            if (log_failure) {
+                std::cerr << "[WARNING] encoder connect failed, continuing without encoder." << std::endl;
+            }
+            return false;
+        }
+        std::cout << "[INFO] encoder connected." << std::endl;
+        return true;
+    }
+
+    bool try_init_hook_mqtt(bool log_failure = true) {
+        if (config.hook_mqtt_device_id.empty()) {
+            return false;
+        }
+        try {
+            hook_mqtt = std::make_unique<HookWarningServer>(config.hook_mqtt_device_id);
+        } catch (const std::exception& ex) {
+            hook_mqtt.reset();
+            if (log_failure) {
+                std::cerr << "[WARNING] hook mqtt connect failed: " << ex.what()
+                          << ", continuing without hook mqtt." << std::endl;
+            }
+            return false;
+        } catch (...) {
+            hook_mqtt.reset();
+            if (log_failure) {
+                std::cerr << "[WARNING] hook mqtt connect failed, continuing without hook mqtt." << std::endl;
+            }
+            return false;
+        }
+        std::cout << "[INFO] hook mqtt connected." << std::endl;
+        return true;
+    }
+
+    static bool should_retry(std::chrono::steady_clock::time_point& next_retry_at,
+                             const std::chrono::steady_clock::time_point now) {
+        if (now < next_retry_at) {
+            return false;
+        }
+        next_retry_at = now + kReconnectInterval;
+        return true;
+    }
+
+    void reconnect_missing_devices() {
+        const auto now = std::chrono::steady_clock::now();
+
+        if (!trolley && should_retry(next_trolley_reconnect_at_, now)) {
+            try_init_trolley();
+        }
+        if (!encoder && should_retry(next_encoder_reconnect_at_, now)) {
+            try_init_encoder();
+        }
+        if (!hook_mqtt && !config.hook_mqtt_device_id.empty() &&
+            should_retry(next_hook_mqtt_reconnect_at_, now)) {
+            try_init_hook_mqtt();
+        }
+    }
 
     void poll_devices_once() {
-        if (!trolley) return;
-        bridge_.exchange_shared_memory(config, *trolley, hook.get(), encoder.get());
+        reconnect_missing_devices();
+        bridge_.exchange_shared_memory(config, trolley.get(), hook_mqtt.get(), encoder.get());
     }
 
     // ── 共享内存发布 ──
@@ -88,28 +180,22 @@ ModbusManagerClient::Status ModbusManagerClient::init() {
         return {false, "config not loaded"};
     }
 
-    Status s = initTrolley();
-    if (!s.ok) return s;
+    int connected_devices = 0;
 
-    {
-        if (!impl_->config_loaded) return {false, "config not loaded"};
-        impl_->hook = std::make_unique<HookWarning>(impl_->config.hook_dev.c_str(),
-                                                    impl_->config.hook_baud,
-                                                    impl_->config.hook_parity,
-                                                    impl_->config.hook_data_bit,
-                                                    impl_->config.hook_stop_bit,
-                                                    impl_->config.hook_slave);
-        if (!impl_->hook->connect()) {
-            std::cerr << "[WARNING] hook connect failed, continuing without hook." << std::endl;
-            impl_->hook.reset();
-        }
+    if (impl_->try_init_trolley()) {
+        connected_devices++;
     }
 
-    initEncoder();
+    if (impl_->try_init_encoder()) {
+        connected_devices++;
+    }
 
-    if (!impl_->config.hook_mqtt_device_id.empty()) {
-        s = initHookMqtt(impl_->config.hook_mqtt_device_id);
-        if (!s.ok) return s;
+    if (impl_->try_init_hook_mqtt()) {
+        connected_devices++;
+    }
+
+    if (connected_devices == 0) {
+        return {false, "all devices failed to connect"};
     }
 
     return {};
@@ -122,39 +208,15 @@ ModbusManagerClient::Status ModbusManagerClient::init() {
 ModbusManagerClient::Status ModbusManagerClient::initTrolley() {
     if (!impl_) impl_ = std::make_unique<Impl>();
     if (!impl_->config_loaded) return {false, "config not loaded"};
-
-    impl_->trolley = std::make_unique<TrolleyControl>(impl_->config.trolley_ip,
-                                                      impl_->config.trolley_port,
-                                                      impl_->config.trolley_slave);
-    if (!impl_->trolley->connect()) {
-        impl_->trolley.reset();
-        return {false, "trolley connect failed"};
-    }
-    return {};
+    bool ok = impl_->try_init_trolley();
+    return {ok, ok ? "" : "trolley connect failed"};
 }
 
 ModbusManagerClient::Status ModbusManagerClient::initEncoder() {
     if (!impl_) impl_ = std::make_unique<Impl>();
     if (!impl_->config_loaded) return {false, "config not loaded"};
-
-    if (!impl_->config.encoder_ip.empty()) {
-        impl_->encoder = std::make_unique<MultiTurnEncoderRTU>(impl_->config.encoder_ip.c_str(),
-                                                               impl_->config.encoder_port,
-                                                               impl_->config.encoder_slave);
-    } else {
-        impl_->encoder = std::make_unique<MultiTurnEncoderRTU>(impl_->config.encoder_dev.c_str(),
-                                                               impl_->config.encoder_baud,
-                                                               impl_->config.encoder_parity,
-                                                               impl_->config.encoder_data_bit,
-                                                               impl_->config.encoder_stop_bit,
-                                                               impl_->config.encoder_slave);
-    }
-    if (!impl_->encoder->connect()) {
-        std::cerr << "[WARNING] encoder connect failed, continuing without encoder." << std::endl;
-        impl_->encoder.reset();
-        return {false, "encoder connect failed"};
-    }
-    return {};
+    bool ok = impl_->try_init_encoder();
+    return {ok, ok ? "" : "encoder connect failed"};
 }
 
 void ModbusManagerClient::shutdownTrolley() {
@@ -213,7 +275,6 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
     }
 
     impl_->encoder.reset();
-    impl_->hook.reset();
     impl_->trolley.reset();
 
     impl_->hook_mqtt.reset();
@@ -222,7 +283,7 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
 }
 
 // ============================================================================
-//  Hook MQTT
+//  Hook MQTT Device
 // ============================================================================
 
 ModbusManagerClient::Status ModbusManagerClient::initHookMqtt(const std::string& device_id) {
@@ -232,17 +293,9 @@ ModbusManagerClient::Status ModbusManagerClient::initHookMqtt(const std::string&
     if (!impl_) {
         impl_ = std::make_unique<Impl>();
     }
-
-    try {
-        impl_->hook_mqtt = std::make_unique<HookWarningServer>(device_id);
-    } catch (const std::exception& ex) {
-        impl_->hook_mqtt.reset();
-        return {false, std::string("failed to init hook mqtt: ") + ex.what()};
-    } catch (...) {
-        impl_->hook_mqtt.reset();
-        return {false, "failed to init hook mqtt"};
-    }
-    return {};
+    impl_->config.hook_mqtt_device_id = device_id;
+    bool ok = impl_->try_init_hook_mqtt();
+    return {ok, ok ? "" : "failed to init hook mqtt"};
 }
 
 ModbusManagerClient::Status ModbusManagerClient::resetHookMqtt() {
@@ -253,72 +306,83 @@ ModbusManagerClient::Status ModbusManagerClient::resetHookMqtt() {
     return {};
 }
 
-ModbusManagerClient::Status ModbusManagerClient::setHookMqttFlashLight(
-    bool light_on, bool sound_7m, bool sound_3m, std::uint8_t volume) {
-    if (!impl_ || !impl_->hook_mqtt) {
-        return {false, "hook mqtt not initialized"};
-    }
-    impl_->hook_mqtt->set_flash_light(light_on, sound_7m, sound_3m, volume);
-    return {};
+#define MM_HOOK_BOOL(sig, call, err)                                           \
+ModbusManagerClient::Status ModbusManagerClient::sig {                         \
+    if (!impl_ || !impl_->hook_mqtt) return {false, "hook mqtt not initialized"}; \
+    bool ok = (call);                                                          \
+    return {ok, ok ? "" : err};                                                \
 }
 
-ModbusManagerClient::Status ModbusManagerClient::setHookMqttSysMode(
-    bool is_standby, std::uint8_t work_mode) {
-    if (!impl_ || !impl_->hook_mqtt) {
-        return {false, "hook mqtt not initialized"};
-    }
-    impl_->hook_mqtt->set_sys_mode(is_standby, work_mode);
-    return {};
+#define MM_HOOK_VOID(sig, call)                                                \
+ModbusManagerClient::Status ModbusManagerClient::sig {                         \
+    if (!impl_ || !impl_->hook_mqtt) return {false, "hook mqtt not initialized"}; \
+    call;                                                                      \
+    return {};                                                                 \
 }
+
+MM_HOOK_BOOL(setHookMqttFlashLight(bool light_on, bool sound_7m, bool sound_3m, std::uint8_t volume),
+             impl_->hook_mqtt->set_flash_light(light_on, sound_7m, sound_3m, volume),
+             "no response from hook device")
+
+MM_HOOK_BOOL(setHookMqttHeartbeatEnable(bool enable),
+             impl_->hook_mqtt->set_heartbeat_enable(enable),
+             "no response from hook device")
+
+MM_HOOK_BOOL(setHookMqttSleepModeEnable(bool enable),
+             impl_->hook_mqtt->set_sleep_mode_enable(enable),
+             "no response from hook device")
 
 ModbusManagerClient::Status ModbusManagerClient::setHookMqttTimeSchedule(
-    std::uint8_t off_hour,
-    std::uint8_t off_minute,
-    std::uint8_t on_hour,
-    std::uint8_t on_minute) {
+    std::uint8_t on_hour, std::uint8_t on_minute,
+    std::uint8_t off_hour, std::uint8_t off_minute) {
     if (!impl_ || !impl_->hook_mqtt) {
         return {false, "hook mqtt not initialized"};
     }
     if (off_hour > 23 || on_hour > 23 || off_minute > 59 || on_minute > 59) {
         return {false, "invalid hook mqtt schedule time"};
     }
-    impl_->hook_mqtt->set_time_schedule(off_hour, off_minute, on_hour, on_minute);
-    return {};
+    bool ok = impl_->hook_mqtt->set_time_schedule(on_hour, on_minute, off_hour, off_minute);
+    return {ok, ok ? "" : "no response from hook device"};
 }
 
-ModbusManagerClient::Status ModbusManagerClient::getHookMqttBmsStatus(BmsStatusData& status) {
+ModbusManagerClient::Status ModbusManagerClient::setHookMqttCurrentTime(
+    std::uint8_t hour, std::uint8_t minute) {
     if (!impl_ || !impl_->hook_mqtt) {
         return {false, "hook mqtt not initialized"};
     }
-    status = impl_->hook_mqtt->get_bms_status();
-    return {};
+    if (hour > 23 || minute > 59) {
+        return {false, "invalid hook mqtt current time"};
+    }
+    bool ok = impl_->hook_mqtt->set_current_time(hour, minute);
+    return {ok, ok ? "" : "no response from hook device"};
 }
 
-ModbusManagerClient::Status ModbusManagerClient::getHookMqttLightStatus(
-    FlashLightStatusData& status) {
-    if (!impl_ || !impl_->hook_mqtt) {
-        return {false, "hook mqtt not initialized"};
-    }
-    status = impl_->hook_mqtt->get_light_status();
-    return {};
-}
+MM_HOOK_VOID(getHookMqttLightStatus(FlashLightCmdData& status),
+             status = impl_->hook_mqtt->get_light_status())
 
-ModbusManagerClient::Status ModbusManagerClient::getHookMqttSysStatus(SysStatusData& status) {
-    if (!impl_ || !impl_->hook_mqtt) {
-        return {false, "hook mqtt not initialized"};
-    }
-    status = impl_->hook_mqtt->get_sys_status();
-    return {};
-}
+MM_HOOK_VOID(getHookMqttBmsStatus(BmsStatusData& status),
+             status = impl_->hook_mqtt->get_bms_status())
 
-ModbusManagerClient::Status ModbusManagerClient::getHookMqttScheduleStatus(
-    SysScheduleData& status) {
-    if (!impl_ || !impl_->hook_mqtt) {
-        return {false, "hook mqtt not initialized"};
-    }
-    status = impl_->hook_mqtt->get_schedule_status();
-    return {};
-}
+MM_HOOK_VOID(getHookMqttHeartbeatEnable(bool& enable),
+             enable = impl_->hook_mqtt->get_heartbeat_enable())
+
+MM_HOOK_VOID(getHookMqttWorkMode(std::uint8_t& mode),
+             mode = impl_->hook_mqtt->get_work_mode())
+
+MM_HOOK_VOID(getHookMqttSleepModeEnable(bool& enable),
+             enable = impl_->hook_mqtt->get_sleep_mode_enable())
+
+MM_HOOK_VOID(getHookMqttSleepSchedule(SleepScheduleData& status),
+             status = impl_->hook_mqtt->get_sleep_schedule())
+
+MM_HOOK_VOID(getHookMqttCurrentTime(CurrentTimeData& status),
+             status = impl_->hook_mqtt->get_current_time())
+
+MM_HOOK_VOID(getHookMqttErrorCode(std::uint8_t& error_code),
+             error_code = impl_->hook_mqtt->get_error_code())
+
+#undef MM_HOOK_BOOL
+#undef MM_HOOK_VOID
 
 // ============================================================================
 //  Trolley Control

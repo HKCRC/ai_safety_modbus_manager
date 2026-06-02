@@ -13,12 +13,6 @@ struct ModbusConfig {
     int trolley_port = 502;
     int trolley_slave = 1;
 
-    std::string hook_dev = "/dev/ttyS0";
-    int hook_baud = 9600;
-    char hook_parity = 'N';
-    int hook_data_bit = 8;
-    int hook_stop_bit = 1;
-    int hook_slave = 3;
     std::string hook_mqtt_device_id;
 
     std::string encoder_dev = "/dev/ttyS1";

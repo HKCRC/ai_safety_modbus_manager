@@ -8,12 +8,6 @@
     "trolley_port": 5020,
     "trolley_slave": 1,
 
-    "hook_dev": "/dev/ttyUSB0",
-    "hook_baud": 9600,
-    "hook_parity": "N",
-    "hook_data_bit": 8,
-    "hook_stop_bit": 1,
-    "hook_slave": 1,
     "hook_mqtt_device_id": "ais001",
 
     "encoder_dev": "",

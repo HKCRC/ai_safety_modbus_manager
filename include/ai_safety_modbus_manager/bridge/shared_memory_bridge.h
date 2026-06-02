@@ -9,7 +9,7 @@
 struct ModbusConfig;
 struct TrolleyStatus;
 class TrolleyControl;
-class HookWarning;
+class HookWarningServer;
 class MultiTurnEncoderRTU;
 
 class SharedMemoryBridge {
@@ -24,8 +24,8 @@ public:
     ~SharedMemoryBridge() = default;
 
     void exchange_shared_memory(const ModbusConfig& config,
-                                TrolleyControl& trolley,
-                                HookWarning* hook,
+                                TrolleyControl* trolley,
+                                HookWarningServer* hook,
                                 MultiTurnEncoderRTU* encoder);
 
     SignalDeviceStatusType& getSignalDeviceStatus() { return signal_device_status_; }

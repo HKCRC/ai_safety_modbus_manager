@@ -28,15 +28,7 @@ bool ModbusConfig::loadFromFile(const std::string& path) {
     if (root.isMember("trolley_port") && root["trolley_port"].isInt()) trolley_port = root["trolley_port"].asInt();
     if (root.isMember("trolley_slave") && root["trolley_slave"].isInt()) trolley_slave = root["trolley_slave"].asInt();
 
-    if (root.isMember("hook_dev") && root["hook_dev"].isString()) hook_dev = root["hook_dev"].asString();
-    if (root.isMember("hook_baud") && root["hook_baud"].isInt()) hook_baud = root["hook_baud"].asInt();
-    if (root.isMember("hook_parity") && root["hook_parity"].isString()) {
-        std::string p = root["hook_parity"].asString();
-        if (!p.empty()) hook_parity = p[0];
-    }
-    if (root.isMember("hook_data_bit") && root["hook_data_bit"].isInt()) hook_data_bit = root["hook_data_bit"].asInt();
-    if (root.isMember("hook_stop_bit") && root["hook_stop_bit"].isInt()) hook_stop_bit = root["hook_stop_bit"].asInt();
-    if (root.isMember("hook_slave") && root["hook_slave"].isInt()) hook_slave = root["hook_slave"].asInt();
+
     if (root.isMember("hook_mqtt_device_id") && root["hook_mqtt_device_id"].isString()) {
         hook_mqtt_device_id = root["hook_mqtt_device_id"].asString();
     }

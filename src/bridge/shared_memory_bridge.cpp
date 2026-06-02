@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <string>
 
-#include "devices/hookWarning/hookWarning.h"
+#include "devices/hookWarning/hookWarning_mqtt.h"
 #include "config/modbus_config.h"
 #include "devices/multi_turn_encoder_rtu.h"
 #include "devices/trolleyControl.h"
@@ -94,14 +94,14 @@ ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::hook_state_fr
 }
 
 void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
-                                                TrolleyControl& trolley,
-                                                HookWarning* hook,
+                                                TrolleyControl* trolley,
+                                                HookWarningServer* hook,
                                                 MultiTurnEncoderRTU* encoder) {
     const double timestamp_seconds = now_seconds();
 
     TrolleyStatus trolley_status{};
-    const bool trolley_ok = trolley.readStatus(trolley_status);
-    const bool hook_ok = hook && hook->refreshStatus();
+    const bool trolley_ok = trolley ? trolley->readStatus(trolley_status) : false;
+    const bool hook_ok = (hook != nullptr);
 
     // ============================================================
     // 1. FaultInfo — 异常信息
@@ -160,18 +160,19 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     }
 
     if (hook) {
-        const std::uint16_t hook_workmode = hook->getWorkmode();
-        const std::uint16_t hook_error = hook->getErrorCode();
+        const std::uint16_t hook_workmode = hook->get_work_mode();
+        const std::uint16_t hook_error = hook->get_error_code();
+        auto bms_status = hook->get_bms_status();
         device_status.hookState = hook_state_from(hook_ok, hook_workmode, hook_error);
         device_status.hookBattery.percent =
-            hook_ok ? static_cast<std::uint8_t>(hook->get_battery_level_feedback()) : 0u;
+            hook_ok ? static_cast<std::uint8_t>(bms_status.battery_percent / 100) : 0u;
         device_status.hookBattery.remainingMin =
-            hook_ok ? static_cast<std::uint32_t>(hook->getDischargeTime()) : 0u;
-        device_status.hookBattery.isCharging = hook_ok ? (hook->getChargingStatus() != 0u) : false;
+            hook_ok ? static_cast<std::uint32_t>(bms_status.remain_time_min) : 0u;
+        device_status.hookBattery.isCharging = hook_ok ? (static_cast<int16_t>(bms_status.current_ma) > 0) : false;
         device_status.hookBattery.chargingTimeMin =
-            hook_ok ? static_cast<std::uint32_t>(hook->getChargeTime()) : 0u;
-        device_status.hookBattery.voltageV = hook_ok ? hook->getVoltage() : 0.0f;
-        device_status.hookBattery.currentA = hook_ok ? hook->getCurrent() : 0.0f;
+            hook_ok ? static_cast<std::uint32_t>(bms_status.charge_full_time_min) : 0u;
+        device_status.hookBattery.voltageV = hook_ok ? (static_cast<float>(bms_status.voltage_mv) / 100.0f) : 0.0f;
+        device_status.hookBattery.currentA = hook_ok ? (static_cast<float>(static_cast<int16_t>(bms_status.current_ma)) / 100.0f) : 0.0f;
     } else {
         device_status.hookState = ai_safety_common::DeviceStatus::EquipmentState::Offline;
     }
@@ -218,18 +219,25 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     signal_alert_(alert_message);
 
     if (hook) {
+        bool changed = false;
+
         if (alert_message.Enable3Alert) {
             if (alert_message.Alert3M != last_alert_3_) {
-                hook->slot_warning(alert_message.Alert3M ? 1 : -1);
                 last_alert_3_ = alert_message.Alert3M;
+                changed = true;
             }
         }
 
         if (alert_message.Enable7Alert) {
             if (alert_message.Alert7M != last_alert_7_) {
-                hook->slot_warning(alert_message.Alert7M ? 2 : -2);
                 last_alert_7_ = alert_message.Alert7M;
+                changed = true;
             }
+        }
+
+        if (changed) {
+            auto light_status = hook->get_light_status();
+            hook->set_flash_light(last_alert_7_ || last_alert_3_, last_alert_7_, last_alert_3_, light_status.volume);
         }
     }
 
@@ -239,14 +247,14 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     std::uint8_t power_command = 0;
     signal_power_button_(power_command);
 
-    if (trolley_ok) {
+    if (trolley_ok && trolley) {
         if (power_command != last_power_command_) {
             if (power_command == 1u) {
-                trolley.setPower3v3(1u);
-                trolley.setPowerCctv(1u);
+                trolley->setPower3v3(1u);
+                trolley->setPowerCctv(1u);
             } else if (power_command == 2u) {
-                trolley.setPowerCctv(0u);
-                trolley.setPower3v3(0u);
+                trolley->setPowerCctv(0u);
+                trolley->setPower3v3(0u);
             }
             last_power_command_ = power_command;
         }

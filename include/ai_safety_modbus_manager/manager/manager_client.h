@@ -34,24 +34,28 @@ public:
     bool hasTrolley() const;
     bool hasEncoder() const;
 
-    // Hook MQTT
+    // ========================================================================
+    //  Hook MQTT Device (Optional)
+    // ========================================================================
+
     Status initHookMqtt(const std::string& device_id);
     Status resetHookMqtt();
 
-    Status setHookMqttFlashLight(bool light_on,
-                                 bool sound_7m,
-                                 bool sound_3m,
-                                 std::uint8_t volume);
-    Status setHookMqttSysMode(bool is_standby, std::uint8_t work_mode);
-    Status setHookMqttTimeSchedule(std::uint8_t off_hour,
-                                   std::uint8_t off_minute,
-                                   std::uint8_t on_hour,
-                                   std::uint8_t on_minute);
+    Status setHookMqttFlashLight(bool light_on, bool sound_7m, bool sound_3m, std::uint8_t volume);
+    Status setHookMqttHeartbeatEnable(bool enable);
+    Status setHookMqttSleepModeEnable(bool enable);
+    Status setHookMqttTimeSchedule(std::uint8_t on_hour, std::uint8_t on_minute,
+                                   std::uint8_t off_hour, std::uint8_t off_minute);
+    Status setHookMqttCurrentTime(std::uint8_t hour, std::uint8_t minute);
 
+    Status getHookMqttLightStatus(FlashLightCmdData& status);
     Status getHookMqttBmsStatus(BmsStatusData& status);
-    Status getHookMqttLightStatus(FlashLightStatusData& status);
-    Status getHookMqttSysStatus(SysStatusData& status);
-    Status getHookMqttScheduleStatus(SysScheduleData& status);
+    Status getHookMqttHeartbeatEnable(bool& enable);
+    Status getHookMqttWorkMode(std::uint8_t& mode);
+    Status getHookMqttSleepModeEnable(bool& enable);
+    Status getHookMqttSleepSchedule(SleepScheduleData& status);
+    Status getHookMqttCurrentTime(CurrentTimeData& status);
+    Status getHookMqttErrorCode(std::uint8_t& error_code);
 
     // Trolley Control
     Status triggerTrolleyReboot();
