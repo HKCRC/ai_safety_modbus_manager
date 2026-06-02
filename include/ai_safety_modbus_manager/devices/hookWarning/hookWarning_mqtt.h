@@ -18,10 +18,10 @@
 
 // 1.1 帧头与通用结构
 struct HookMqttFrameHeader {
-    uint8_t header_byte;  // 帧头字节 (0xA5)
-    uint8_t seq_num;      // 包序号 (0~255 循环递增)
-    uint8_t content_id;   // 内容 ID (0x01~0x05)
-    uint8_t data_len;     // 数据区长度 
+    uint8_t header_byte; 
+    uint8_t seq_num;     
+    uint8_t content_id;   
+    uint8_t data_len;    
 };
 
 // 1.2 内容 ID = 0x01: 灯光警报业务
@@ -48,7 +48,7 @@ struct EnableHeartbeatData {
 
 // 1.5 内容 ID = 0x05: 心跳包 (数据长度 2)
 struct HeartBeatData {
-    uint16_t heartbeat; // 标准心跳 1Hz 递增
+    uint16_t heartbeat; 
 };
 
 // 1.6 内容 ID = 0x06: 工作模式 (数据长度 1)

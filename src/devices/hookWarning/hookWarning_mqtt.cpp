@@ -327,9 +327,9 @@ void HookWarningServer::poll_task() {
     int counter_100ms = 0; // 用一个 100ms 为单位的计数器来管理不同任务的频率
     
     while (running_) {
-        // 心跳使能 (0x04)、工作模式 (0x06)、睡眠模式使能 (0x07)、睡眠时间 (0x08)、当前时间 (0x09) 每 2 秒查询
+      
         if (counter_100ms % 20 == 0) {
-            send_inquiry(0x01); // 灯光
+            send_inquiry(0x01); // 灯光与喇叭状态
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             send_inquiry(0x04);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -352,8 +352,6 @@ void HookWarningServer::poll_task() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         counter_100ms++;
         
-        // 防止计数器溢出（虽然 int 很大，但在长时间运行中找个公倍数清零更安全）
-        // 20 和 50 的最小公倍数是 100 (代表 10 秒)
         if (counter_100ms >= 100) {
             counter_100ms = 0;
         }
