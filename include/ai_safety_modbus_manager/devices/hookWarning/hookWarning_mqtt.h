@@ -120,7 +120,7 @@ private:
     std::string device_id_;
 
     // --- MQTT 客户端 ---
-    std::mutex mqtt_mutex_;
+    mutable std::mutex mqtt_mutex_;
     std::unique_ptr<MqttClient> mqtt_client_;
 
     // --- MQTT 主题 ---

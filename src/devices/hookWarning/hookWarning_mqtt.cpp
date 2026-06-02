@@ -78,6 +78,7 @@ void HookWarningServer::init_mqtt() {
 }
 
 bool HookWarningServer::is_connected() const {
+    std::lock_guard<std::mutex> lock(mqtt_mutex_);
     if (!mqtt_client_) return false;
     return mqtt_client_->connected();
 }
