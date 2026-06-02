@@ -241,6 +241,8 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
 
     if (trolley_ok) {
         if (power_command != last_power_command_) {
+            std::cout << "[PowerButton] power_command=" << static_cast<int>(power_command)
+                      << " (last=" << static_cast<int>(last_power_command_) << ")\n";
             if (power_command == 1u) {
                 trolley.setPower3v3(1u);
                 trolley.setPowerCctv(1u);
