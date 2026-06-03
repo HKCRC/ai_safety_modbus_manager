@@ -1,9 +1,11 @@
 #include "devices/hookWarning/hookWarning_mqtt.h"
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <endian.h>
 
 
 #define FRAME_HEADER_BYTE 0xA5
@@ -130,6 +132,11 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_err_print).count() >= 5) {
             std::cerr << "[HookWarningServer] Received error frame for CMD_ID 0x" << std::hex << (int)error_cmd 
                       << ", error_code: " << std::dec << (int)error_code << "\n";
+            std::cerr << "[HookWarningServer] Raw Error Frame (" << raw_length << " bytes): ";
+            for (size_t i = 0; i < raw_length; ++i) {
+                std::cerr << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
+            }
+            std::cerr << std::dec << "\n";
             last_err_print = now;
         }
         {
@@ -145,19 +152,39 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
         std::lock_guard<std::mutex> lock(data_mutex_);
         switch (content_id) {
             case 0x01: { // 灯光警报状态
+                {
+                    std::cout << "[HookWarningServer] Raw 0x01 Frame (" << raw_length << " bytes): ";
+                    for (size_t i = 0; i < raw_length; ++i) {
+                        std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
+                    }
+                    std::cout << std::dec << std::endl;
+                }
                 if (header->data_len == sizeof(FlashLightCmdData)) {
                     std::memcpy(&latest_light_status_, data_ptr, sizeof(FlashLightCmdData));
+                    
+                    std::cout << "[HookWarningServer] Parsed 0x01 Status -> "
+                              << "Light: " << (int)latest_light_status_.light_cmd 
+                              << ", Sound 7m: " << (int)latest_light_status_.sound_7m_cmd
+                              << ", Sound 3m: " << (int)latest_light_status_.sound_3m_cmd
+                              << ", Volume: " << (int)latest_light_status_.volume << std::endl;
                 }
                 break;
             }
             case 0x02: { // 电池状态
+                {
+                    std::cout << "[HookWarningServer] Raw 0x02 Frame (" << raw_length << " bytes): ";
+                    for (size_t i = 0; i < raw_length; ++i) {
+                        std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
+                    }
+                    std::cout << std::dec << std::endl;
+                }
                 if (header->data_len == sizeof(BmsStatusData)) {
                     const BmsStatusData* net_data = reinterpret_cast<const BmsStatusData*>(data_ptr);
-                    latest_bms_status_.battery_percent = ntohs(net_data->battery_percent);
-                    latest_bms_status_.voltage_mv = ntohs(net_data->voltage_mv);
-                    latest_bms_status_.current_ma = ntohs(net_data->current_ma);
-                    latest_bms_status_.remain_time_min = ntohs(net_data->remain_time_min);
-                    latest_bms_status_.charge_full_time_min = ntohs(net_data->charge_full_time_min);
+                    latest_bms_status_.battery_percent = le16toh(net_data->battery_percent);
+                    latest_bms_status_.voltage_mv = le16toh(net_data->voltage_mv);
+                    latest_bms_status_.current_ma = le16toh(net_data->current_ma);
+                    latest_bms_status_.remain_time_min = le16toh(net_data->remain_time_min);
+                    latest_bms_status_.charge_full_time_min = le16toh(net_data->charge_full_time_min);
                 }
                 break;
             }
@@ -185,15 +212,15 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
             case 0x08: { // 睡眠模式时间
                 if (header->data_len == sizeof(SleepScheduleData)) {
                     const SleepScheduleData* net_data = reinterpret_cast<const SleepScheduleData*>(data_ptr);
-                    latest_sleep_schedule_.on_time = ntohs(net_data->on_time);
-                    latest_sleep_schedule_.off_time = ntohs(net_data->off_time);
+                    latest_sleep_schedule_.on_time = le16toh(net_data->on_time);
+                    latest_sleep_schedule_.off_time = le16toh(net_data->off_time);
                 }
                 break;
             }
             case 0x09: { // 当前时间
                 if (header->data_len == sizeof(CurrentTimeData)) {
                     const CurrentTimeData* net_data = reinterpret_cast<const CurrentTimeData*>(data_ptr);
-                    latest_current_time_.rtc_time = ntohs(net_data->rtc_time);
+                    latest_current_time_.rtc_time = le16toh(net_data->rtc_time);
                 }
                 break;
             }
@@ -330,8 +357,8 @@ bool HookWarningServer::set_time_schedule(uint8_t on_hour, uint8_t on_minute, ui
     uint16_t host_on_time  = (on_hour << 8) | on_minute;
     uint16_t host_off_time = (off_hour << 8) | off_minute;
 
-    cmd.on_time  = htons(host_on_time);
-    cmd.off_time = htons(host_off_time);
+    cmd.on_time  = htole16(host_on_time);
+    cmd.off_time = htole16(host_off_time);
 
     for (int i = 0; i < 3; ++i) {
         if (send_command_and_wait(0x08, reinterpret_cast<const uint8_t*>(&cmd), sizeof(SleepScheduleData))) {
@@ -345,7 +372,7 @@ bool HookWarningServer::set_time_schedule(uint8_t on_hour, uint8_t on_minute, ui
 bool HookWarningServer::set_current_time(uint8_t hour, uint8_t minute) {
     CurrentTimeData cmd;
     uint16_t host_time = (hour << 8) | minute;
-    cmd.rtc_time = htons(host_time);
+    cmd.rtc_time = htole16(host_time);
 
     for (int i = 0; i < 3; ++i) {
         if (send_command_and_wait(0x09, reinterpret_cast<const uint8_t*>(&cmd), sizeof(CurrentTimeData))) {
