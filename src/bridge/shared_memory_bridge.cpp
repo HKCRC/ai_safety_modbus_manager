@@ -101,7 +101,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
 
     TrolleyStatus trolley_status{};
     const bool trolley_ok = trolley ? trolley->readStatus(trolley_status) : false;
-    const bool hook_ok = (hook != nullptr);
+    const bool hook_ok = (hook != nullptr && hook->is_connected());
 
     // ============================================================
     // 1. FaultInfo — 异常信息
@@ -218,7 +218,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     ai_safety_common::AlertMessage alert_message;
     signal_alert_(alert_message);
 
-    if (hook) {
+    if (hook_ok) {
         bool changed = false;
 
         if (alert_message.Enable3Alert) {
