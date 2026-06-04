@@ -297,6 +297,13 @@ bool HookWarningServer::send_command(uint8_t content_id, const uint8_t* data, ui
     buffer[total_len - 1] = (crc >> 8) & 0xFF; // 高字节
 
     std::string payload_str(reinterpret_cast<char*>(buffer.data()), total_len);
+
+    // 打印下发的指令（心跳 0x05 不打印）
+    if (content_id != 0x05) {
+        std::cout << "[HookWarningServer] SEND 0x" << std::hex << (int)content_id << std::dec
+                  << " topic=" << topic_cmd_ << std::endl;
+    }
+
     if (content_id == 0x05) {
         return mqtt_client_->publish(topic_heartbeat_, payload_str, 0, false);
     } else {
