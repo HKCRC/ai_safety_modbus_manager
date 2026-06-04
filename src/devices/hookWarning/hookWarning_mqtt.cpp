@@ -32,7 +32,6 @@ HookWarningServer::HookWarningServer(const std::string& device_id)
     std::memset(&latest_sleep_schedule_, 0, sizeof(latest_sleep_schedule_));
     std::memset(&latest_current_time_, 0, sizeof(latest_current_time_));
     std::memset(&latest_error_code_, 0, sizeof(latest_error_code_));
-    last_response_time_ = std::chrono::steady_clock::now() - std::chrono::seconds(16);
 
     init_mqtt();
 
@@ -104,21 +103,8 @@ bool HookWarningServer::is_connected() const {
     std::lock_guard<std::mutex> lock(mqtt_mutex_);
     if (!mqtt_client_) return false;
     
-    // 用收到的有效应答帧判断 Hook 是否在线；超过 15 秒未收到则视为离线。
-    auto now = std::chrono::steady_clock::now();
-    
-    // 必须获取 data_mutex_ 锁才能安全访问 last_response_time_
-    // 考虑到 is_connected() 可能是被高频调用的 const 方法，需要 const_cast 或 mutable
-    std::chrono::steady_clock::time_point response_time;
-    {
-        std::lock_guard<std::mutex> data_lock(const_cast<std::mutex&>(data_mutex_));
-        response_time = last_response_time_;
-    }
-    
-    bool receive_timeout =
-        std::chrono::duration_cast<std::chrono::seconds>(now - response_time).count() > 15;
-    
-    return mqtt_client_->connected() && !receive_timeout;
+    // MQTT连着，并且收过0x06，并且连续未收到0x06的次数小于等于3
+    return mqtt_client_->connected() && has_received_0x06_.load() && (missed_0x06_count_.load() <= 3);
 }
 
 void HookWarningServer::on_topic_inform(const std::string& topic, const std::string& payload) {
@@ -231,6 +217,8 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
             case 0x06: { // 工作模式
                 if (header->data_len == sizeof(WorkModeData)) {
                     std::memcpy(&latest_work_mode_, data_ptr, sizeof(WorkModeData));
+                    has_received_0x06_ = true;
+                    missed_0x06_count_ = 0;
                 }
                 break;
             }
@@ -265,11 +253,6 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
                 std::cout << "[HookWarningServer] Unhandled Content ID: 0x" << std::hex << (int)content_id << std::dec << "\n";
                 break;
         }
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(data_mutex_);
-        last_response_time_ = std::chrono::steady_clock::now();
     }
 
     {
@@ -353,12 +336,7 @@ bool HookWarningServer::set_flash_light(bool light_on, bool sound_7m, bool sound
     cmd.sound_3m_cmd = sound_3m ? 1 : 0;
     cmd.volume = volume & 0x1F;
 
-    for (int i = 0; i < 3; ++i) {
-        if (send_command_and_wait(0x01, reinterpret_cast<const uint8_t*>(&cmd), sizeof(FlashLightCmdData))) {
-            return true;
-        }
-    }
-    return false;
+    return send_command_and_wait(0x01, reinterpret_cast<const uint8_t*>(&cmd), sizeof(FlashLightCmdData));
 }
 
 // 0x04 控制心跳使能
@@ -423,7 +401,6 @@ bool HookWarningServer::set_current_time(uint8_t hour, uint8_t minute) {
 // ==========================================
 void HookWarningServer::poll_task() {
     int counter_100ms = 0;
-    int consecutive_publish_failures = 0;
     constexpr auto kReinitInterval = std::chrono::seconds(10);
     auto last_reinit_log_time = std::chrono::steady_clock::now() - kReinitInterval;
     auto last_reinit_attempt_time = std::chrono::steady_clock::now() - kReinitInterval;
@@ -431,8 +408,8 @@ void HookWarningServer::poll_task() {
     while (running_) {
         // 工作模式 (0x06) 每 15 秒 (150 * 100ms) 查询一次。
         if (counter_100ms % 150 == 0) {
-            bool ok = send_inquiry(0x06);
-            if (!ok) consecutive_publish_failures++; else consecutive_publish_failures = 0;
+            missed_0x06_count_++;
+            send_inquiry(0x06);
         }
 
         // 电池状态 (0x02) 每 10 秒 (100 * 100ms) 查询一次。
@@ -441,31 +418,24 @@ void HookWarningServer::poll_task() {
             if (counter_100ms % 150 == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-
-            bool ok = send_inquiry(0x02);
-            if (!ok) consecutive_publish_failures++; else consecutive_publish_failures = 0;
+            send_inquiry(0x02);
         }
 
-        std::chrono::steady_clock::time_point response_time;
+        bool mqtt_connected = false;
         {
-            std::lock_guard<std::mutex> lock(data_mutex_);
-            response_time = last_response_time_;
+            std::lock_guard<std::mutex> lock(mqtt_mutex_);
+            mqtt_connected = mqtt_client_ && mqtt_client_->connected();
         }
-        auto now = std::chrono::steady_clock::now();
-        bool receive_timeout =
-            std::chrono::duration_cast<std::chrono::seconds>(now - response_time).count() > 15;
 
-        if (consecutive_publish_failures >= 5 || receive_timeout) {
+        if (!mqtt_connected) {
+            auto now = std::chrono::steady_clock::now();
             if (now - last_reinit_log_time >= kReinitInterval) {
-                std::cout << "[HookWarningServer] MQTT disconnected or deaf (timeout: "
-                          << receive_timeout << ", fails: " << consecutive_publish_failures
-                          << "), attempting to re-initialize..." << std::endl;
+                std::cout << "[HookWarningServer] MQTT disconnected, attempting to re-initialize..." << std::endl;
                 last_reinit_log_time = now;
             }
             if (now - last_reinit_attempt_time >= kReinitInterval) {
                 init_mqtt();
                 last_reinit_attempt_time = now;
-                consecutive_publish_failures = 0;
             }
         }
 

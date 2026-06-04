@@ -259,12 +259,43 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
             }
         }
 
-        if (changed) {
-            hook->set_flash_light(
+        int retry_count = 0;
+        while (changed && retry_count < 3) {
+            bool success = hook->set_flash_light(
                 last_alert_7_ || last_alert_3_,
                 last_alert_7_,
                 last_alert_3_,
                 kDefaultAlertVolume);
+
+            if (success) {
+                break;
+            }
+
+            retry_count++;
+            if (retry_count >= 3) {
+                break;
+            }
+
+            ai_safety_common::AlertMessage new_alert;
+            signal_alert_(new_alert);
+
+            bool new_changed = false;
+            if (new_alert.Enable3Alert) {
+                if (new_alert.Alert3M != last_alert_3_) {
+                    last_alert_3_ = new_alert.Alert3M;
+                    new_changed = true;
+                }
+            }
+            if (new_alert.Enable7Alert) {
+                if (new_alert.Alert7M != last_alert_7_) {
+                    last_alert_7_ = new_alert.Alert7M;
+                    new_changed = true;
+                }
+            }
+
+            if (new_changed) {
+                retry_count = 0; // 重置重试次数，直接发最新的
+            }
         }
     }
 

@@ -138,10 +138,11 @@ private:
     // --- 状态变量 ---
     std::atomic<uint8_t> send_seq_num_;        
     uint8_t current_heartbeat_ = 0;   
+    std::atomic<int> missed_0x06_count_{0};
+    std::atomic<bool> has_received_0x06_{false};
 
     // 保存从设备读取到的最新状态 (加锁保护)
     std::mutex data_mutex_;
-    std::chrono::steady_clock::time_point last_response_time_;
     FlashLightCmdData latest_light_status_;
     BmsStatusData latest_bms_status_;
     heart_beat_en_t latest_heartbeat_enable_;
