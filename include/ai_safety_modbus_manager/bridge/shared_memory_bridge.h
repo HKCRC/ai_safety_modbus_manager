@@ -35,6 +35,8 @@ public:
     SignalPowerButtonType& getSignalPowerButton() { return signal_power_button_; }
 
 private:
+    static constexpr std::uint8_t kDefaultAlertVolume = 30u;
+
     static double now_seconds();
     static double deg_to_rad(double deg);
     static float cos_deg(float deg);
@@ -48,7 +50,7 @@ private:
         const TrolleyStatus& status, bool trolley_ok);
 
     static ai_safety_common::DeviceStatus::EquipmentState hook_state_from(
-        bool hook_ok, std::uint16_t workmode, std::uint16_t error_code);
+        bool hook_ok, std::uint16_t workmode);
 
     SignalDeviceStatusType signal_device_status_;
     SignalFaultInfoType signal_fault_info_;

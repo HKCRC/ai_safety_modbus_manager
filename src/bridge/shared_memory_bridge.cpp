@@ -5,11 +5,25 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <iostream>
 
 #include "devices/hookWarning/hookWarning_mqtt.h"
 #include "config/modbus_config.h"
 #include "devices/multi_turn_encoder_rtu.h"
 #include "devices/trolleyControl.h"
+
+namespace {
+
+std::uint8_t hook_battery_percent_from_raw(std::uint16_t raw_percent_x100) {
+    const std::uint16_t clamped = std::min<std::uint16_t>(raw_percent_x100, 10000u);
+    return static_cast<std::uint8_t>(clamped / 100u);
+}
+
+std::uint32_t hook_battery_time_from_raw(std::uint16_t raw_minutes) {
+    return static_cast<std::uint32_t>(raw_minutes);
+}
+
+}  // namespace
 
 double SharedMemoryBridge::now_seconds() {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
@@ -80,17 +94,23 @@ ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::trolley_state
 }
 
 ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::hook_state_from(
-    bool hook_ok, std::uint16_t workmode, std::uint16_t error_code) {
+    bool hook_ok, std::uint16_t workmode) {
     if (!hook_ok) {
         return ai_safety_common::DeviceStatus::EquipmentState::Offline;
     }
-    if (error_code != 0u) {
-        return ai_safety_common::DeviceStatus::EquipmentState::Error;
+    switch (workmode) {
+        case 0u:
+            return ai_safety_common::DeviceStatus::EquipmentState::Standby;
+        case 1u:
+            return ai_safety_common::DeviceStatus::EquipmentState::Active;
+        case 2u:
+            // 0x06=2 means low battery, not device fault. Battery details are exposed separately.
+            return ai_safety_common::DeviceStatus::EquipmentState::Active;
+        case 3u:
+            return ai_safety_common::DeviceStatus::EquipmentState::Error;
+        default:
+            return ai_safety_common::DeviceStatus::EquipmentState::Unknown;
     }
-    if (workmode == 0u) {
-        return ai_safety_common::DeviceStatus::EquipmentState::Standby;
-    }
-    return ai_safety_common::DeviceStatus::EquipmentState::Active;
 }
 
 void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
@@ -161,18 +181,20 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
 
     if (hook) {
         const std::uint16_t hook_workmode = hook->get_work_mode();
-        const std::uint16_t hook_error = hook->get_error_code();
         auto bms_status = hook->get_bms_status();
-        device_status.hookState = hook_state_from(hook_ok, hook_workmode, hook_error);
+        device_status.hookState = hook_state_from(hook_ok, hook_workmode);
         device_status.hookBattery.percent =
-            hook_ok ? static_cast<std::uint8_t>(bms_status.battery_percent / 100) : 0u;
+            hook_ok ? hook_battery_percent_from_raw(bms_status.battery_percent_x100) : 0u;
+        device_status.hookBattery.isCharging =
+            hook_ok ? (bms_status.remain_discharge_min == 0xFFFFu) : false;
         device_status.hookBattery.remainingMin =
-            hook_ok ? static_cast<std::uint32_t>(bms_status.remain_time_min) : 0u;
-        device_status.hookBattery.isCharging = hook_ok ? (static_cast<int16_t>(bms_status.current_ma) > 0) : false;
+            hook_ok ? hook_battery_time_from_raw(bms_status.remain_discharge_min) : 0u;
         device_status.hookBattery.chargingTimeMin =
-            hook_ok ? static_cast<std::uint32_t>(bms_status.charge_full_time_min) : 0u;
-        device_status.hookBattery.voltageV = hook_ok ? (static_cast<float>(bms_status.voltage_mv) / 100.0f) : 0.0f;
-        device_status.hookBattery.currentA = hook_ok ? (static_cast<float>(static_cast<int16_t>(bms_status.current_ma)) / 100.0f) : 0.0f;
+            hook_ok ? hook_battery_time_from_raw(bms_status.remain_charge_min) : 0u;
+        device_status.hookBattery.voltageV =
+            hook_ok ? (static_cast<float>(bms_status.voltage_10mv) / 100.0f) : 0.0f;
+        device_status.hookBattery.currentA =
+            hook_ok ? (static_cast<float>(bms_status.current_10ma) / 100.0f) : 0.0f;
     } else {
         device_status.hookState = ai_safety_common::DeviceStatus::EquipmentState::Offline;
     }
@@ -210,6 +232,8 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
         crane_state.groundToTrolleyDistanceM = std::max(corrected_height_1_m, corrected_height_2_m);
     }
 
+
+
     signal_crane_state_(crane_state);
 
     // ============================================================
@@ -236,8 +260,11 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
         }
 
         if (changed) {
-            auto light_status = hook->get_light_status();
-            hook->set_flash_light(last_alert_7_ || last_alert_3_, last_alert_7_, last_alert_3_, light_status.volume);
+            hook->set_flash_light(
+                last_alert_7_ || last_alert_3_,
+                last_alert_7_,
+                last_alert_3_,
+                kDefaultAlertVolume);
         }
     }
 

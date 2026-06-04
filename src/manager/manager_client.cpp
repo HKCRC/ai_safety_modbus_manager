@@ -37,7 +37,10 @@ struct ModbusManagerClient::Impl {
 
     ModbusConfig config{};
     bool config_loaded = false;
+    static constexpr auto kFailLogInterval = std::chrono::seconds(30);
     static constexpr auto kReconnectInterval = std::chrono::seconds(2);
+    std::chrono::steady_clock::time_point last_trolley_fail_log_{};
+    std::chrono::steady_clock::time_point last_encoder_fail_log_{};
 
     // ── 核心设备 ──
     std::unique_ptr<TrolleyControl> trolley;
@@ -54,6 +57,7 @@ struct ModbusManagerClient::Impl {
         trolley = std::make_unique<TrolleyControl>(config.trolley_ip,
                                                    config.trolley_port,
                                                    config.trolley_slave);
+        if (!log_failure) trolley->setDisableCerr(true);
         if (!trolley->connect()) {
             trolley.reset();
             if (log_failure) {
@@ -80,6 +84,7 @@ struct ModbusManagerClient::Impl {
                                                             config.encoder_stop_bit,
                                                             config.encoder_slave);
         }
+        if (!log_failure) encoder->setDisableCerr(true);
         if (!encoder->connect()) {
             encoder.reset();
             if (log_failure) {
@@ -98,14 +103,10 @@ struct ModbusManagerClient::Impl {
         try {
             std::cout << "[INFO] hook mqtt connecting as " << config.hook_mqtt_device_id << "..." << std::endl;
             hook_mqtt = std::make_unique<HookWarningServer>(config.hook_mqtt_device_id); 
-            std::this_thread::sleep_for(std::chrono::milliseconds(2000)); 
-            
-            if (hook_mqtt->is_connected()) {
-                std::cout << "[INFO] hook mqtt connected." << std::endl;
-            } else {
-                std::cout << "[INFO] hook mqtt disconnected." << std::endl;
-            }
-            // 无论是否 connected，模块对象都是初始化成功的，底层的重连机制会继续尝试
+            std::cout << "[INFO] hook mqtt initialized, start() will print MQTT, battery(0x02),"
+                      << " and work mode(0x06) response status."
+                      << std::endl;
+            // 模块对象初始化成功后，由 start() 基于 MQTT 连接与应答帧分别打印启动状态。
             return true;
         } catch (const std::exception& ex) {
             hook_mqtt.reset();
@@ -136,15 +137,32 @@ struct ModbusManagerClient::Impl {
         const auto now = std::chrono::steady_clock::now();
 
         if (!trolley && should_retry(next_trolley_reconnect_at_, now)) {
-            try_init_trolley();
+            if (!try_init_trolley(false)) {
+                if (now - last_trolley_fail_log_ >= kFailLogInterval) {
+                    std::cerr << "[WARNING] trolley still unreachable (retrying every "
+                              << kReconnectInterval.count() << "s)..." << std::endl;
+                    last_trolley_fail_log_ = now;
+                }
+            } else {
+                std::cout << "[INFO] trolley reconnected successfully." << std::endl;
+            }
         }
         if (!encoder && should_retry(next_encoder_reconnect_at_, now)) {
-            try_init_encoder();
+            if (!try_init_encoder(false)) {
+                if (now - last_encoder_fail_log_ >= kFailLogInterval) {
+                    std::cerr << "[WARNING] encoder still unreachable (retrying every "
+                              << kReconnectInterval.count() << "s)..." << std::endl;
+                    last_encoder_fail_log_ = now;
+                }
+            } else {
+                std::cout << "[INFO] encoder reconnected successfully." << std::endl;
+            }
         }
         if (!hook_mqtt && !config.hook_mqtt_device_id.empty() &&
             should_retry(next_hook_mqtt_reconnect_at_, now)) {
-            try_init_hook_mqtt();
+            try_init_hook_mqtt(false);
             if (hook_mqtt) {
+                std::cout << "[INFO] hook mqtt reconnected successfully." << std::endl;
                 hook_mqtt->start();
             }
         }

@@ -32,7 +32,7 @@ HookWarningServer::HookWarningServer(const std::string& device_id)
     std::memset(&latest_sleep_schedule_, 0, sizeof(latest_sleep_schedule_));
     std::memset(&latest_current_time_, 0, sizeof(latest_current_time_));
     std::memset(&latest_error_code_, 0, sizeof(latest_error_code_));
-    last_rx_time_ = std::chrono::steady_clock::now();
+    last_response_time_ = std::chrono::steady_clock::now() - std::chrono::seconds(16);
 
     init_mqtt();
 
@@ -52,6 +52,27 @@ void HookWarningServer::start() {
         return;
     }
     running_ = true;
+
+    bool mqtt_connected = false;
+    {
+        std::lock_guard<std::mutex> lock(mqtt_mutex_);
+        mqtt_connected = mqtt_client_ && mqtt_client_->connected();
+    }
+    std::cout << "[HookWarningServer] start(): MQTT "
+              << (mqtt_connected ? "connected." : "disconnected.") << std::endl;
+
+    bool battery_responded = false;
+    bool work_mode_responded = false;
+    constexpr int kStartResponseTimeoutMs = 5000;
+    if (mqtt_connected) {
+        battery_responded = send_command_and_wait(0x02, nullptr, 0, kStartResponseTimeoutMs);
+        work_mode_responded = send_command_and_wait(0x06, nullptr, 0, kStartResponseTimeoutMs);
+    }
+    const bool hookwarning_connected = battery_responded || work_mode_responded;
+    std::cout << "[HookWarningServer] start(): hookwarning "
+              << (hookwarning_connected ? "connected." : "not connected.")
+              << std::endl;
+
     poll_thread_ = std::thread(&HookWarningServer::poll_task, this);
     heartbeat_thread_ = std::thread(&HookWarningServer::heartbeat_task, this);
 }
@@ -67,7 +88,7 @@ void HookWarningServer::init_mqtt() {
 
     char hostname[256];
     gethostname(hostname, sizeof(hostname));
-    cloud_cfg.client_id = std::string("crane_cloud_HookWarning_") + hostname + "/" + MqttClient::getLocalIP();
+    cloud_cfg.client_id = std::string("crane_cloud_") + hostname + "/" + MqttClient::getLocalIP();
 
     mqtt_client_ = std::make_unique<MqttClient>();
     mqtt_client_->init(cloud_cfg);
@@ -82,7 +103,22 @@ void HookWarningServer::init_mqtt() {
 bool HookWarningServer::is_connected() const {
     std::lock_guard<std::mutex> lock(mqtt_mutex_);
     if (!mqtt_client_) return false;
-    return mqtt_client_->connected();
+    
+    // 用收到的有效应答帧判断 Hook 是否在线；超过 15 秒未收到则视为离线。
+    auto now = std::chrono::steady_clock::now();
+    
+    // 必须获取 data_mutex_ 锁才能安全访问 last_response_time_
+    // 考虑到 is_connected() 可能是被高频调用的 const 方法，需要 const_cast 或 mutable
+    std::chrono::steady_clock::time_point response_time;
+    {
+        std::lock_guard<std::mutex> data_lock(const_cast<std::mutex&>(data_mutex_));
+        response_time = last_response_time_;
+    }
+    
+    bool receive_timeout =
+        std::chrono::duration_cast<std::chrono::seconds>(now - response_time).count() > 15;
+    
+    return mqtt_client_->connected() && !receive_timeout;
 }
 
 void HookWarningServer::on_topic_inform(const std::string& topic, const std::string& payload) {
@@ -90,11 +126,6 @@ void HookWarningServer::on_topic_inform(const std::string& topic, const std::str
 }
 
 void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t* raw_data, size_t raw_length) {
-    {
-        std::lock_guard<std::mutex> lock(data_mutex_);
-        last_rx_time_ = std::chrono::steady_clock::now();
-    }
-
     if (raw_length < 6) return; // 帧头(4) + CRC(2)
     
     const HookMqttFrameHeader* header = reinterpret_cast<const HookMqttFrameHeader*>(raw_data);
@@ -153,11 +184,16 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
         switch (content_id) {
             case 0x01: { // 灯光警报状态
                 {
-                    std::cout << "[HookWarningServer] Raw 0x01 Frame (" << raw_length << " bytes): ";
-                    for (size_t i = 0; i < raw_length; ++i) {
-                        std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
+                    static auto last_raw_01_print = std::chrono::steady_clock::now();
+                    auto now = std::chrono::steady_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_raw_01_print).count() >= 5) {
+                        std::cout << "[HookWarningServer] Raw 0x01 Frame (" << raw_length << " bytes): ";
+                        for (size_t i = 0; i < raw_length; ++i) {
+                            std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
+                        }
+                        std::cout << std::dec << std::endl;
+                        last_raw_01_print = now;
                     }
-                    std::cout << std::dec << std::endl;
                 }
                 if (header->data_len == sizeof(FlashLightCmdData)) {
                     std::memcpy(&latest_light_status_, data_ptr, sizeof(FlashLightCmdData));
@@ -171,20 +207,15 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
                 break;
             }
             case 0x02: { // 电池状态
-                {
-                    std::cout << "[HookWarningServer] Raw 0x02 Frame (" << raw_length << " bytes): ";
-                    for (size_t i = 0; i < raw_length; ++i) {
-                        std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)raw_data[i] << " ";
-                    }
-                    std::cout << std::dec << std::endl;
-                }
-                if (header->data_len == sizeof(BmsStatusData)) {
+                // 兼容实际硬件下发的 12 字节
+                if (header->data_len >= sizeof(BmsStatusData)) {
                     const BmsStatusData* net_data = reinterpret_cast<const BmsStatusData*>(data_ptr);
-                    latest_bms_status_.battery_percent = le16toh(net_data->battery_percent);
-                    latest_bms_status_.voltage_mv = le16toh(net_data->voltage_mv);
-                    latest_bms_status_.current_ma = le16toh(net_data->current_ma);
-                    latest_bms_status_.remain_time_min = le16toh(net_data->remain_time_min);
-                    latest_bms_status_.charge_full_time_min = le16toh(net_data->charge_full_time_min);
+                    latest_bms_status_.battery_percent_x100 = le16toh(net_data->battery_percent_x100);
+                    latest_bms_status_.voltage_10mv = le16toh(net_data->voltage_10mv);
+                    latest_bms_status_.current_10ma = le16toh(net_data->current_10ma);
+                    latest_bms_status_.remain_discharge_min = le16toh(net_data->remain_discharge_min);
+                    latest_bms_status_.remain_charge_min = le16toh(net_data->remain_charge_min);
+                    latest_bms_status_.battery_protect = le16toh(net_data->battery_protect);
                 }
                 break;
             }
@@ -234,6 +265,11 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
                 std::cout << "[HookWarningServer] Unhandled Content ID: 0x" << std::hex << (int)content_id << std::dec << "\n";
                 break;
         }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        last_response_time_ = std::chrono::steady_clock::now();
     }
 
     {
@@ -304,7 +340,7 @@ bool HookWarningServer::send_command_and_wait(uint8_t content_id, const uint8_t*
         return responded_content_id_ == content_id || responded_content_id_ == (content_id | 0x80); 
     });
     
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 限制频率防粘包
+    std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 限制频率防粘包
     return ok && (responded_content_id_ == content_id);
 }
 
@@ -388,38 +424,55 @@ bool HookWarningServer::set_current_time(uint8_t hour, uint8_t minute) {
 void HookWarningServer::poll_task() {
     int counter_100ms = 0;
     int consecutive_publish_failures = 0;
+    constexpr auto kReinitInterval = std::chrono::seconds(10);
+    auto last_reinit_log_time = std::chrono::steady_clock::now() - kReinitInterval;
+    auto last_reinit_attempt_time = std::chrono::steady_clock::now() - kReinitInterval;
 
     while (running_) {
-        // 电池状态 (0x02) 每 10 秒 (100 * 100ms) 查询一次
+        // 工作模式 (0x06) 每 15 秒 (150 * 100ms) 查询一次。
+        if (counter_100ms % 150 == 0) {
+            bool ok = send_inquiry(0x06);
+            if (!ok) consecutive_publish_failures++; else consecutive_publish_failures = 0;
+        }
+
+        // 电池状态 (0x02) 每 10 秒 (100 * 100ms) 查询一次。
+        // 若与 0x06 同周期触发，插入短延迟避免连续发包。
         if (counter_100ms % 100 == 0) {
+            if (counter_100ms % 150 == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+
             bool ok = send_inquiry(0x02);
             if (!ok) consecutive_publish_failures++; else consecutive_publish_failures = 0;
         }
 
-        std::chrono::steady_clock::time_point rx_time;
+        std::chrono::steady_clock::time_point response_time;
         {
             std::lock_guard<std::mutex> lock(data_mutex_);
-            rx_time = last_rx_time_;
+            response_time = last_response_time_;
         }
         auto now = std::chrono::steady_clock::now();
-        bool receive_timeout = std::chrono::duration_cast<std::chrono::seconds>(now - rx_time).count() > 15;
+        bool receive_timeout =
+            std::chrono::duration_cast<std::chrono::seconds>(now - response_time).count() > 15;
 
         if (consecutive_publish_failures >= 5 || receive_timeout) {
-            std::cout << "[HookWarningServer] MQTT disconnected or deaf (timeout: "
-                      << receive_timeout << ", fails: " << consecutive_publish_failures
-                      << "), attempting to re-initialize..." << std::endl;
-            init_mqtt();
-            consecutive_publish_failures = 0;
-            {
-                std::lock_guard<std::mutex> lock(data_mutex_);
-                last_rx_time_ = std::chrono::steady_clock::now();
+            if (now - last_reinit_log_time >= kReinitInterval) {
+                std::cout << "[HookWarningServer] MQTT disconnected or deaf (timeout: "
+                          << receive_timeout << ", fails: " << consecutive_publish_failures
+                          << "), attempting to re-initialize..." << std::endl;
+                last_reinit_log_time = now;
+            }
+            if (now - last_reinit_attempt_time >= kReinitInterval) {
+                init_mqtt();
+                last_reinit_attempt_time = now;
+                consecutive_publish_failures = 0;
             }
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         counter_100ms++;
 
-        if (counter_100ms >= 100) {
+        if (counter_100ms >= 300) {
             counter_100ms = 0;
         }
     }

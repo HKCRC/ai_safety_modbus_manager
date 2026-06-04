@@ -32,13 +32,14 @@ struct FlashLightCmdData {
     uint8_t volume       : 5; // Bit 3-7: 音量(0~30档)
 };
 
-// 1.3 内容 ID = 0x02: 电池状态 (数据长度 10)
-struct BmsStatusData {
-    uint16_t battery_percent;      // 电量 0~10000 (10000=100%)
-    uint16_t voltage_mv;           // 电压 单位: 0.01V
-    uint16_t current_ma;           // 电流 单位: 0.01A
-    uint16_t remain_time_min;      // 剩余时间 (min)
-    uint16_t charge_full_time_min; // 充满时间 (min)
+// 1.3 内容 ID = 0x02: 电池状态 (数据长度 12, 匹配实际硬件发回的包)
+struct __attribute__((packed)) BmsStatusData {
+    uint16_t battery_percent_x100; // 2字节：0~10000，10000 表示 100% 电量
+    uint16_t voltage_10mv;         // 2字节：单位 0.01V
+    uint16_t current_10ma;         // 2字节：单位 0.01A
+    uint16_t remain_discharge_min; // 2字节：单位 min，充电时为 0xFFFF
+    uint16_t remain_charge_min;    // 2字节：单位 min，放电时为 0xFFFF
+    uint16_t battery_protect;      // 2字节：电池保护状态
 };
 
 // 1.4 内容 ID = 0x04: 使能工作心跳 (数据长度 1)
@@ -140,7 +141,7 @@ private:
 
     // 保存从设备读取到的最新状态 (加锁保护)
     std::mutex data_mutex_;
-    std::chrono::steady_clock::time_point last_rx_time_;
+    std::chrono::steady_clock::time_point last_response_time_;
     FlashLightCmdData latest_light_status_;
     BmsStatusData latest_bms_status_;
     heart_beat_en_t latest_heartbeat_enable_;
