@@ -142,7 +142,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
             fault_info.category = ai_safety_common::FaultInfo::Category::MpptCommunicationFault;
         } else if (!trolley_status.laser_1_read_ok || !trolley_status.laser_2_read_ok) {
             fault_info.category = ai_safety_common::FaultInfo::Category::LaserCommunicationFault;
-        } else if (!trolley_status.cctv_ping_ok) {
+        } else if (!trolley_status.laser_power_ok) {
             fault_info.category = ai_safety_common::FaultInfo::Category::CctvCommunicationFault;
         }
     }
@@ -309,9 +309,9 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
         if (power_command != last_power_command_) {
             if (power_command == 1u) {
                 trolley->setPower3v3(1u);
-                trolley->setPowerCctv(1u);
+                trolley->setPowerLaser(1u);
             } else if (power_command == 2u) {
-                trolley->setPowerCctv(0u);
+                trolley->setPowerLaser(0u);
                 trolley->setPower3v3(0u);
             }
             last_power_command_ = power_command;

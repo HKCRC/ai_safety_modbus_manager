@@ -425,10 +425,10 @@ MM_BOOL(setTrolleyPower5v(std::uint8_t value),
         impl_->trolley->setPower5v(value),
         "setPower5v")
 
-MM_BOOL(setTrolleyPowerCctv(std::uint8_t value),
+MM_BOOL(setTrolleyPowerLaser(std::uint8_t value),
         trolley, "trolley",
-        impl_->trolley->setPowerCctv(value),
-        "setPowerCctv")
+        impl_->trolley->setPowerLaser(value),
+        "setPowerLaser")
 
 MM_BOOL(setTrolleyPower4g(std::uint8_t value),
         trolley, "trolley",

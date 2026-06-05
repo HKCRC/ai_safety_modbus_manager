@@ -23,7 +23,7 @@ TrolleyControl::TrolleyControl(const char* ip_address, int port, int slave_addre
 bool TrolleyControl::writeOnOff(int addr, std::uint8_t value) {
     const bool on = (value != 0u);
     const bool is_inverted_power_control =
-        (addr == COIL_CTRL_3V3) || (addr == COIL_CTRL_5V) || (addr == COIL_CTRL_CCTV) || (addr == COIL_CTRL_4G);
+        (addr == COIL_CTRL_3V3) || (addr == COIL_CTRL_5V) || (addr == COIL_CTRL_LASER_POWER) || (addr == COIL_CTRL_4G);
     const std::uint16_t modbus_value = is_inverted_power_control ? (on ? 0u : 1u) : (on ? 1u : 0u);
     if (writeCoil(addr, modbus_value)) {
         return true;
@@ -43,8 +43,8 @@ bool TrolleyControl::setPower5v(std::uint8_t value) {
     return writeOnOff(COIL_CTRL_5V, value);
 }
 
-bool TrolleyControl::setPowerCctv(std::uint8_t value) {
-    return writeOnOff(COIL_CTRL_CCTV, value);
+bool TrolleyControl::setPowerLaser(std::uint8_t value) {
+    return writeOnOff(COIL_CTRL_LASER_POWER, value);
 }
 
 bool TrolleyControl::setPower4g(std::uint8_t value) {
@@ -80,7 +80,7 @@ bool TrolleyControl::setShutdownTime(uint16_t value) {
 }
 
 bool TrolleyControl::readStatus(TrolleyStatus& out) {
-    uint8_t bits[13] = {0}; // 增加读取的线圈数量，包括了休眠模式状态 (28)
+    uint8_t bits[13] = {0}; 
     if (!readCoils(COIL_STATUS_3V3, 13, bits)) {
         return false;
     }
@@ -92,7 +92,7 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
     out.mppt_read_ok = to_flag(bits[8] == 0);
     out.laser_1_read_ok = to_flag(bits[9] == 0);
     out.laser_2_read_ok = to_flag(bits[10] == 0);
-    out.cctv_ping_ok = to_flag(bits[11] == 0);
+    out.laser_power_ok = to_flag(bits[11] == 0);
     out.sleep_mode_active = to_flag(bits[12] != 0);
 
     uint16_t system_regs[4] = {0};

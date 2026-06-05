@@ -22,7 +22,7 @@ struct TrolleyStatus {
     std::uint8_t mppt_read_ok = 1;          // 1=ok, 0=read fail
     std::uint8_t laser_1_read_ok = 1;       // 1=ok, 0=read fail
     std::uint8_t laser_2_read_ok = 1;       // 1=ok, 0=read fail
-    std::uint8_t cctv_ping_ok = 1;          // 1=ok, 0=ping fail
+    std::uint8_t laser_power_ok = 1;        // 1=ok, 0=ping fail
     
     // --- 2. 小车电池信息 ---
     std::uint8_t battery_level = 0;         // a. 电量百分比 %
@@ -39,6 +39,13 @@ struct TrolleyStatus {
 
     // --- 4. 激光测距 ---
     std::array<uint16_t, 2> laser_distance = {0, 0}; // a/b. 激光测距距离
+
+    //补有效位字段
+    std::uint8_t system_error_code_valid = 0;
+    std::uint8_t device_status_valid = 0;
+    std::uint8_t battery_info_valid = 0;
+    std::uint8_t mppt_charge_status_valid = 0;
+    std::uint8_t laser_distance_valid = 0;
 };
 
 class TrolleyControl : public ModbusControl {
@@ -46,7 +53,7 @@ public:
     static constexpr int COIL_REBOOT = 0;
     static constexpr int COIL_CTRL_3V3 = 1;
     static constexpr int COIL_CTRL_5V = 2;
-    static constexpr int COIL_CTRL_CCTV = 3;
+    static constexpr int COIL_CTRL_LASER_POWER = 3;
     static constexpr int COIL_CTRL_4G = 4;
     static constexpr int COIL_CTRL_STANDBY_ENABLE = 5;
     static constexpr int COIL_CTRL_STANDBY_POWER_MODE = 6;
@@ -54,7 +61,7 @@ public:
 
     static constexpr int COIL_STATUS_3V3 = 16;
     static constexpr int COIL_STATUS_5V = 17;
-    static constexpr int COIL_STATUS_CCTV = 18;
+    static constexpr int COIL_STATUS_LASER_POWER = 18;
     static constexpr int COIL_STATUS_4G = 19;
     static constexpr int COIL_STATUS_POWER_SAVING_MODE = 20;
     static constexpr int COIL_STATUS_BMS_CHARGING = 21;
@@ -63,7 +70,7 @@ public:
     static constexpr int COIL_STATUS_MPPT_READ_FAIL = 24;
     static constexpr int COIL_STATUS_LASER_1_READ_FAIL = 25;
     static constexpr int COIL_STATUS_LASER_2_READ_FAIL = 26;
-    static constexpr int COIL_STATUS_CCTV_PING_FAIL = 27;
+    static constexpr int COIL_STATUS_LASER_POWER_FAIL = 27;
     static constexpr int COIL_STATUS_SLEEP_MODE = 28;
 
     static constexpr int IREG_SYSTEM_VERSION_HIGH = 0;
@@ -94,7 +101,7 @@ public:
     bool triggerReboot();
     bool setPower3v3(std::uint8_t value);          // 1=on, 0=off
     bool setPower5v(std::uint8_t value);           // 1=on, 0=off
-    bool setPowerCctv(std::uint8_t value);         // 1=on, 0=off
+    bool setPowerLaser(std::uint8_t value);        // 1=on, 0=off
     bool setPower4g(std::uint8_t value);           // 1=on, 0=off
     bool setStandbyEnable(std::uint8_t value);     // 1=enable, 0=disable
     bool setStandbyPowerMode(std::uint8_t value);  // 1=enable, 0=disable

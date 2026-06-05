@@ -61,7 +61,7 @@ public:
     Status triggerTrolleyReboot();
     Status setTrolleyPower3v3(std::uint8_t value);
     Status setTrolleyPower5v(std::uint8_t value);
-    Status setTrolleyPowerCctv(std::uint8_t value);
+    Status setTrolleyPowerLaser(std::uint8_t value);
     Status setTrolleyPower4g(std::uint8_t value);
     Status setTrolleyStandbyEnable(std::uint8_t value);
     Status setTrolleyStandbyPowerMode(std::uint8_t value);
