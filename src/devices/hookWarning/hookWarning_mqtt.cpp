@@ -421,9 +421,9 @@ void HookWarningServer::poll_task() {
 
         // 电池状态 (0x02) 每 10 秒 (100 * 100ms) 查询一次。
         // 若与 0x06 同周期触发，插入短延迟避免连续发包。
-        if (counter_100ms % 100 == 0) {
+        if (counter_100ms % 100== 0) {
             if (counter_100ms % 150 == 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
             }
             send_inquiry(0x02);
         }

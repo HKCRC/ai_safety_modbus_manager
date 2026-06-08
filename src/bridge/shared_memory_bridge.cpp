@@ -122,15 +122,17 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     TrolleyStatus trolley_status{};
     const bool trolley_ok = trolley ? trolley->readStatus(trolley_status) : false;
     const bool hook_ok = (hook != nullptr && hook->is_connected());
+    const bool is_flat_top = (config.crane_type == "flat" || config.crane_type == "flat_top" ||
+                              config.crane_type == "flat_top_tower_crane");
 
     // ============================================================
     // 1. FaultInfo — 异常信息
     ai_safety_common::FaultInfo fault_info{};
     fault_info.timestamp = timestamp_seconds;
     if (!trolley_ok) {
-        if (!ping_ipv4_once(config.cab_bridge_ip)) {
+        if (is_flat_top && !ping_ipv4_once(config.cab_bridge_ip)) {
             fault_info.category = ai_safety_common::FaultInfo::Category::CabBridgeFault;
-        } else if (!ping_ipv4_once(config.trolley_bridge_ip)) {
+        } else if (is_flat_top && !ping_ipv4_once(config.trolley_bridge_ip)) {
             fault_info.category = ai_safety_common::FaultInfo::Category::TrolleyBridgeFault;
         } else {
             fault_info.category = ai_safety_common::FaultInfo::Category::TrolleyStm32Fault;
@@ -151,9 +153,6 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     // ============================================================
     // 2. DeviceStatus — 设备总体状态
     // ============================================================
-    const bool is_flat_top =
-        (config.crane_type == "flat" || config.crane_type == "flat_top" || config.crane_type == "pingtou");
-
     ai_safety_common::DeviceStatus device_status{};
     device_status.timestamp = timestamp_seconds;
     device_status.trolleyState = trolley_state_from(trolley_status, trolley_ok);
