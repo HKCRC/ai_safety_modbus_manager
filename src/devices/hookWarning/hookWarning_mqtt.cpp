@@ -10,6 +10,10 @@
 
 #define FRAME_HEADER_BYTE 0xA5
 
+namespace {
+constexpr int kPoll0x06TimeoutMs = 2000;
+}
+
 // ==========================================
 // 构造函数与初始化
 // ==========================================
@@ -103,8 +107,8 @@ bool HookWarningServer::is_connected() const {
     std::lock_guard<std::mutex> lock(mqtt_mutex_);
     if (!mqtt_client_) return false;
     
-    // MQTT连着，并且收过0x06，并且连续未收到0x06的次数小于等于3
-    return mqtt_client_->connected() && has_received_0x06_.load() && (missed_0x06_count_.load() <= 3);
+    // MQTT 连着，并且收过 0x06，并且连续未收到 0x06 的次数小于 3 次。
+    return mqtt_client_->connected() && has_received_0x06_.load() && (missed_0x06_count_.load() < 3);
 }
 
 void HookWarningServer::on_topic_inform(const std::string& topic, const std::string& payload) {
@@ -255,17 +259,28 @@ void HookWarningServer::parse_mqtt_frame(const std::string& topic, const uint8_t
         }
     }
 
+    const auto now = std::chrono::steady_clock::now();
+    long long time_diff_ms = -1;
     {
         std::lock_guard<std::mutex> lk(response_mutex_);
         responded_content_id_ = content_id;
+        if (content_id == 0x06 && last_0x06_send_time_.time_since_epoch().count() != 0) {
+            time_diff_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - last_0x06_send_time_).count();
+            waiting_for_0x06_response_ = false;
+        }
     }
-    
-    static auto last_resp_print = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_resp_print).count() >= 5) {
-        std::cout << "[HookWarningServer] Got 0x" << std::hex << (int)content_id << std::dec
-                  << " response from " << topic << std::endl;
-        last_resp_print = now;
+
+    if (content_id == 0x06 && time_diff_ms >= 0) {
+        std::cout << "[HookWarningServer] Got 0x06 response from " << topic
+                  << ", time_diff = " << time_diff_ms << " ms" << std::endl;
+    } else {
+        static auto last_resp_print = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_resp_print).count() >= 5) {
+            std::cout << "[HookWarningServer] Got 0x" << std::hex << (int)content_id << std::dec
+                      << " response from " << topic << std::endl;
+            last_resp_print = now;
+        }
     }
     
     response_cv_.notify_all();
@@ -304,11 +319,17 @@ bool HookWarningServer::send_command(uint8_t content_id, const uint8_t* data, ui
                   << " topic=" << topic_cmd_ << std::endl;
     }
 
-    if (content_id == 0x05) {
-        return mqtt_client_->publish(topic_heartbeat_, payload_str, 0, false);
-    } else {
-        return mqtt_client_->publish(topic_cmd_, payload_str, 2, false);
+    const bool publish_ok = (content_id == 0x05)
+                                ? mqtt_client_->publish(topic_heartbeat_, payload_str, 0, false)
+                                : mqtt_client_->publish(topic_cmd_, payload_str, 2, false);
+
+    if (publish_ok && content_id == 0x06) {
+        std::lock_guard<std::mutex> lk(response_mutex_);
+        last_0x06_send_time_ = std::chrono::steady_clock::now();
+        waiting_for_0x06_response_ = true;
     }
+
+    return publish_ok;
 }
 
 bool HookWarningServer::send_inquiry(uint8_t content_id) {
@@ -329,6 +350,12 @@ bool HookWarningServer::send_command_and_wait(uint8_t content_id, const uint8_t*
     bool ok = response_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms), [this, content_id]{ 
         return responded_content_id_ == content_id || responded_content_id_ == (content_id | 0x80); 
     });
+
+    if (!ok && content_id == 0x06) {
+        waiting_for_0x06_response_ = false;
+        std::cerr << "[HookWarningServer] Warning: timeout waiting for 0x06 response, timeout_ms="
+                  << timeout_ms << std::endl;
+    }
     
     std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 限制频率防粘包
     return ok && (responded_content_id_ == content_id);
@@ -415,7 +442,6 @@ void HookWarningServer::poll_task() {
     while (running_) {
         // 工作模式 (0x06) 每 15 秒 (150 * 100ms) 查询一次。
         if (counter_100ms % 150 == 0) {
-            missed_0x06_count_++;
             send_inquiry(0x06);
         }
 
@@ -443,6 +469,30 @@ void HookWarningServer::poll_task() {
             if (now - last_reinit_attempt_time >= kReinitInterval) {
                 init_mqtt();
                 last_reinit_attempt_time = now;
+            }
+        }
+
+        bool work_mode_timeout = false;
+        int missed_count = 0;
+        {
+            std::lock_guard<std::mutex> lk(response_mutex_);
+            const auto now = std::chrono::steady_clock::now();
+            if (waiting_for_0x06_response_ &&
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - last_0x06_send_time_).count() >=
+                    kPoll0x06TimeoutMs) {
+                waiting_for_0x06_response_ = false;
+                missed_count = ++missed_0x06_count_;
+                work_mode_timeout = true;
+            }
+        }
+
+        if (work_mode_timeout) {
+            std::cerr << "[HookWarningServer] Warning: timeout waiting for 0x06 response, timeout_ms="
+                      << kPoll0x06TimeoutMs << std::endl;
+            if (missed_count == 3) {
+                std::cerr << "[HookWarningServer] Warning: missed 0x06 response 3 times consecutively, "
+                             "marking hook offline."
+                          << std::endl;
             }
         }
 

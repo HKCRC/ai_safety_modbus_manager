@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -156,6 +157,8 @@ private:
     std::mutex response_mutex_;
     std::condition_variable response_cv_;
     uint8_t responded_content_id_ = 0;
+    std::chrono::steady_clock::time_point last_0x06_send_time_{};
+    bool waiting_for_0x06_response_ = false;
 
     // --- 核心方法 ---
     void init_mqtt();
