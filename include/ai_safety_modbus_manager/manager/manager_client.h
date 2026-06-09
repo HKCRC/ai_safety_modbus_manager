@@ -88,8 +88,11 @@ public:
     boost::signals2::connection connectDeviceStatus(
         const std::function<void(ai_safety_common::DeviceStatus)>& slot);
 
-    boost::signals2::connection connectFaultInfo(
-        const std::function<void(ai_safety_common::FaultInfo)>& slot);
+    boost::signals2::connection connectTrolleyConnectFaultInfo(
+        const std::function<void(ai_safety_common::TrolleyConnectFaultInfo)>& slot);
+
+    boost::signals2::connection connectTrolleyDevicesErrorInfo(
+        const std::function<void(ai_safety_common::TrolleyDevicesErrorInfo)>& slot);
 
     boost::signals2::connection connectCraneState(
         const std::function<void(ai_safety_common::CraneState)>& slot);

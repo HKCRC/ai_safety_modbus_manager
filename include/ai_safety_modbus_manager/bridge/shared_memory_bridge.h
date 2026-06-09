@@ -15,7 +15,10 @@ class MultiTurnEncoderRTU;
 class SharedMemoryBridge {
 public:
     using SignalDeviceStatusType = boost::signals2::signal<void(ai_safety_common::DeviceStatus)>;
-    using SignalFaultInfoType = boost::signals2::signal<void(ai_safety_common::FaultInfo)>;
+    using SignalTrolleyConnectFaultInfoType =
+        boost::signals2::signal<void(ai_safety_common::TrolleyConnectFaultInfo)>;
+    using SignalTrolleyDevicesErrorInfoType =
+        boost::signals2::signal<void(ai_safety_common::TrolleyDevicesErrorInfo)>;
     using SignalCraneStateType = boost::signals2::signal<void(ai_safety_common::CraneState)>;
     using SignalAlertType = boost::signals2::signal<void(ai_safety_common::AlertMessage&)>;
     using SignalPowerButtonType = boost::signals2::signal<void(std::uint8_t&)>;
@@ -29,7 +32,12 @@ public:
                                 MultiTurnEncoderRTU* encoder);
 
     SignalDeviceStatusType& getSignalDeviceStatus() { return signal_device_status_; }
-    SignalFaultInfoType& getSignalFaultInfo() { return signal_fault_info_; }
+    SignalTrolleyConnectFaultInfoType& getSignalTrolleyConnectFaultInfo() {
+        return signal_trolley_connect_fault_info_;
+    }
+    SignalTrolleyDevicesErrorInfoType& getSignalTrolleyDevicesErrorInfo() {
+        return signal_trolley_devices_error_info_;
+    }
     SignalCraneStateType& getSignalCraneState() { return signal_crane_state_; }
     SignalAlertType& getSignalAlert() { return signal_alert_; }
     SignalPowerButtonType& getSignalPowerButton() { return signal_power_button_; }
@@ -53,7 +61,8 @@ private:
         bool hook_ok, std::uint16_t workmode);
 
     SignalDeviceStatusType signal_device_status_;
-    SignalFaultInfoType signal_fault_info_;
+    SignalTrolleyConnectFaultInfoType signal_trolley_connect_fault_info_;
+    SignalTrolleyDevicesErrorInfoType signal_trolley_devices_error_info_;
     SignalCraneStateType signal_crane_state_;
     SignalAlertType signal_alert_;
     SignalPowerButtonType signal_power_button_;

@@ -287,7 +287,8 @@ ModbusManagerClient::Status ModbusManagerClient::stop() {
     impl_->polling_active_.store(false);
 
     impl_->bridge_.getSignalDeviceStatus().disconnect_all_slots();
-    impl_->bridge_.getSignalFaultInfo().disconnect_all_slots();
+    impl_->bridge_.getSignalTrolleyConnectFaultInfo().disconnect_all_slots();
+    impl_->bridge_.getSignalTrolleyDevicesErrorInfo().disconnect_all_slots();
     impl_->bridge_.getSignalCraneState().disconnect_all_slots();
     impl_->bridge_.getSignalAlert().disconnect_all_slots();
     impl_->bridge_.getSignalPowerButton().disconnect_all_slots();
@@ -539,10 +540,18 @@ boost::signals2::connection ModbusManagerClient::connectDeviceStatus(
     return {};
 }
 
-boost::signals2::connection ModbusManagerClient::connectFaultInfo(
-    const std::function<void(ai_safety_common::FaultInfo)>& slot) {
+boost::signals2::connection ModbusManagerClient::connectTrolleyConnectFaultInfo(
+    const std::function<void(ai_safety_common::TrolleyConnectFaultInfo)>& slot) {
     if (impl_) {
-        return impl_->bridge_.getSignalFaultInfo().connect(slot);
+        return impl_->bridge_.getSignalTrolleyConnectFaultInfo().connect(slot);
+    }
+    return {};
+}
+
+boost::signals2::connection ModbusManagerClient::connectTrolleyDevicesErrorInfo(
+    const std::function<void(ai_safety_common::TrolleyDevicesErrorInfo)>& slot) {
+    if (impl_) {
+        return impl_->bridge_.getSignalTrolleyDevicesErrorInfo().connect(slot);
     }
     return {};
 }

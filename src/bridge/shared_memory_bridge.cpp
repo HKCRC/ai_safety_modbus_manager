@@ -87,7 +87,7 @@ ai_safety_common::DeviceStatus::EquipmentState SharedMemoryBridge::trolley_state
     if (status.device_status == 1u) {
         return ai_safety_common::DeviceStatus::EquipmentState::Active;
     }
-    if (status.device_status == 2u) {
+    if (status.device_status == 3u) {
         return ai_safety_common::DeviceStatus::EquipmentState::Error;
     }
     return ai_safety_common::DeviceStatus::EquipmentState::Unknown;
@@ -126,32 +126,38 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
                               config.crane_type == "flat_top_tower_crane");
 
     // ============================================================
-    // 1. FaultInfo — 异常信息
-    ai_safety_common::FaultInfo fault_info{};
-    fault_info.timestamp = timestamp_seconds;
+    // 1. TrolleyConnectFaultInfo — 小车连接异常
+    ai_safety_common::TrolleyConnectFaultInfo connect_fault{};
+    connect_fault.timestamp = timestamp_seconds;
     if (!trolley_ok) {
         if (is_flat_top && !ping_ipv4_once(config.cab_bridge_ip)) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::CabBridgeFault;
+            connect_fault.category =
+                ai_safety_common::TrolleyConnectFaultInfo::Category::CabBridgeFault;
         } else if (is_flat_top && !ping_ipv4_once(config.trolley_bridge_ip)) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::TrolleyBridgeFault;
+            connect_fault.category =
+                ai_safety_common::TrolleyConnectFaultInfo::Category::TrolleyBridgeFault;
         } else {
-            fault_info.category = ai_safety_common::FaultInfo::Category::TrolleyStm32Fault;
-        }
-    } else {
-        if (!trolley_status.bms_read_ok) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::BmsCommunicationFault;
-        } else if (!trolley_status.mppt_read_ok) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::MpptCommunicationFault;
-        } else if (!trolley_status.laser_1_read_ok || !trolley_status.laser_2_read_ok) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::LaserCommunicationFault;
-        } else if (!trolley_status.laser_power_ok) {
-            fault_info.category = ai_safety_common::FaultInfo::Category::CctvCommunicationFault;
+            connect_fault.category =
+                ai_safety_common::TrolleyConnectFaultInfo::Category::TrolleyStm32Fault;
         }
     }
-    signal_fault_info_(fault_info);
+    signal_trolley_connect_fault_info_(connect_fault);
 
     // ============================================================
-    // 2. DeviceStatus — 设备总体状态
+    // 2. TrolleyDevicesErrorInfo — 小车设备通信异常（可同时多项为 true）
+    ai_safety_common::TrolleyDevicesErrorInfo devices_error{};
+    devices_error.timestamp = timestamp_seconds;
+    if (trolley_ok) {
+        devices_error.bmsCommunicationFault = !trolley_status.bms_read_ok;
+        devices_error.mpptCommunicationFault = !trolley_status.mppt_read_ok;
+        devices_error.laserCommunicationFault =
+            !trolley_status.laser_1_read_ok || !trolley_status.laser_2_read_ok;
+        devices_error.cctvCommunicationFault = !trolley_status.laser_power_ok;
+    }
+    signal_trolley_devices_error_info_(devices_error);
+
+    // ============================================================
+    // 3. DeviceStatus — 设备总体状态
     // ============================================================
     ai_safety_common::DeviceStatus device_status{};
     device_status.timestamp = timestamp_seconds;
@@ -201,7 +207,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     signal_device_status_(device_status);
 
     // ============================================================
-    // 3. CraneState — 距离信息
+    // 4. CraneState — 距离信息
     // ============================================================
     ai_safety_common::CraneState crane_state{};
     crane_state.timestamp = timestamp_seconds;
@@ -236,7 +242,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     signal_crane_state_(crane_state);
 
     // ============================================================
-    // 4. AlertMessage — 报警控制
+    // 5. AlertMessage — 报警控制
     // ============================================================
     ai_safety_common::AlertMessage alert_message;
     signal_alert_(alert_message);
@@ -299,7 +305,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     }
 
     // ============================================================
-    // 5. PowerButton — 电源控制
+    // 6. PowerButton — 电源控制
     // ============================================================
     std::uint8_t power_command = 0;
     signal_power_button_(power_command);
