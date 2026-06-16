@@ -182,6 +182,9 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
             (!trolley_is_charging && trolley_status.discharge_time_valid)
                 ? static_cast<std::uint32_t>(trolley_status.discharge_time_min)
                 : 0u;
+    } else {
+        device_status.trolleyBattery.percent = 100u;
+        device_status.solarCharge = ai_safety_common::DeviceStatus::SolarChargeState::NotCharging;
     }
 
     if (hook) {
