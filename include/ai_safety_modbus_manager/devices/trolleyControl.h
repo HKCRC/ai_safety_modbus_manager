@@ -22,7 +22,8 @@ struct TrolleyStatus {
     std::uint8_t mppt_read_ok = 1;          // 1=ok, 0=read fail
     std::uint8_t laser_1_read_ok = 1;       // 1=ok, 0=read fail
     std::uint8_t laser_2_read_ok = 1;       // 1=ok, 0=read fail
-    std::uint8_t laser_power_ok = 1;        // 1=ok, 0=ping fail
+    std::uint8_t cctv_ping_ok = 1;          // 1=ok, 0=ping fail
+    std::uint8_t bridge_switch_closed = 1;  // 1=closed, 0=open
     
     // --- 2. 小车电池信息 ---
     std::uint8_t battery_level = 0;         // a. 电量百分比 %
@@ -70,8 +71,9 @@ public:
     static constexpr int COIL_STATUS_MPPT_READ_FAIL = 24;
     static constexpr int COIL_STATUS_LASER_1_READ_FAIL = 25;
     static constexpr int COIL_STATUS_LASER_2_READ_FAIL = 26;
-    static constexpr int COIL_STATUS_LASER_POWER_FAIL = 27;
+    static constexpr int COIL_STATUS_CCTV_PING_FAIL = 27;
     static constexpr int COIL_STATUS_SLEEP_MODE = 28;
+    static constexpr int COIL_STATUS_BRIDGE_SWITCH = 29;
 
     static constexpr int IREG_SYSTEM_VERSION_HIGH = 0;
     static constexpr int IREG_SYSTEM_VERSION_LOW = 1;
@@ -89,8 +91,7 @@ public:
 
     static constexpr int HREG_WORK_MODE = 0;
     static constexpr int HREG_RTC_SYS_TIME_DIFF = 1;
-    static constexpr int HREG_RTC_HOUR = 2;
-    static constexpr int HREG_RTC_MINUTE = 3;
+    static constexpr int HREG_RTC_TIME = 3;
     static constexpr int HREG_STARTUP_TIME = 4;
     static constexpr int HREG_SHUTDOWN_TIME = 5;
     static constexpr int HREG_DEVICE_STATUS = 6;
@@ -108,6 +109,7 @@ public:
     bool setSleepMode(std::uint8_t value);         // 1=sleep, 0=normal
     bool setWorkMode(uint16_t mode);
     bool setRtcTime(uint16_t hour, uint16_t minute);
+    bool setRtcTimePacked(uint16_t packed_time);
     bool setStartupTime(uint16_t value);
     bool setShutdownTime(uint16_t value);
 

@@ -1,18 +1,18 @@
 {
     "crane_type": "flat",
     "x86_ip": "192.168.61.2",
-    "trolley_ip": "127.0.0.1",
+    "trolley_ip": "192.168.61.36",
     "cab_bridge_ip": "192.168.61.67",
     "trolley_bridge_ip": "192.168.61.62",
 
-    "trolley_port": 5020,
+    "trolley_port": 502,
     "trolley_slave": 1,
 
-    "hook_mqtt_device_id": "ais001",
+    "hook_mqtt_device_id": "ais006",
 
     "encoder_dev": "/dev/ttyUSB0",
     "encoder_ip": "",
-    "encoder_port": 5020,
+    "encoder_port": 502,
     "encoder_baud": 9600,
     "encoder_parity": "E",
     "encoder_data_bit": 8,

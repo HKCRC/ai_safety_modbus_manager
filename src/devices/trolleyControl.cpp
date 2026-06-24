@@ -68,7 +68,12 @@ bool TrolleyControl::setWorkMode(uint16_t mode) {
 }
 
 bool TrolleyControl::setRtcTime(uint16_t hour, uint16_t minute) {
-    return writeRegister(HREG_RTC_HOUR, hour) && writeRegister(HREG_RTC_MINUTE, minute);
+    const uint16_t packed_time = (hour << 8) | minute;
+    return writeRegister(HREG_RTC_TIME, packed_time);
+}
+
+bool TrolleyControl::setRtcTimePacked(uint16_t packed_time) {
+    return writeRegister(HREG_RTC_TIME, packed_time);
 }
 
 bool TrolleyControl::setStartupTime(uint16_t value) {
@@ -80,8 +85,8 @@ bool TrolleyControl::setShutdownTime(uint16_t value) {
 }
 
 bool TrolleyControl::readStatus(TrolleyStatus& out) {
-    uint8_t bits[13] = {0}; 
-    if (!readCoils(COIL_STATUS_3V3, 13, bits)) {
+    uint8_t bits[15] = {0};
+    if (!readCoils(COIL_STATUS_3V3, 15, bits)) {
         return false;
     }
 
@@ -92,8 +97,9 @@ bool TrolleyControl::readStatus(TrolleyStatus& out) {
     out.mppt_read_ok = to_flag(bits[8] == 0);
     out.laser_1_read_ok = to_flag(bits[9] == 0);
     out.laser_2_read_ok = to_flag(bits[10] == 0);
-    out.laser_power_ok = to_flag(bits[11] == 0);
+    out.cctv_ping_ok = to_flag(bits[11] == 0);
     out.sleep_mode_active = to_flag(bits[12] != 0);
+    out.bridge_switch_closed = to_flag(bits[13] == 0);
 
     uint16_t system_regs[4] = {0};
     if (readInputRegisters(IREG_SYSTEM_VERSION_HIGH, 4, system_regs)) {

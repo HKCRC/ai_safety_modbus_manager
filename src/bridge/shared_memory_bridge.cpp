@@ -152,7 +152,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
         devices_error.mpptCommunicationFault = !trolley_status.mppt_read_ok;
         devices_error.laserCommunicationFault =
             !trolley_status.laser_1_read_ok || !trolley_status.laser_2_read_ok;
-        devices_error.cctvCommunicationFault = !trolley_status.laser_power_ok;
+        devices_error.cctvCommunicationFault = !trolley_status.cctv_ping_ok;
     }
     signal_trolley_devices_error_info_(devices_error);
 
