@@ -214,6 +214,7 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     // ============================================================
     ai_safety_common::CraneState crane_state{};
     crane_state.timestamp = timestamp_seconds;
+    crane_state.encoderCalibrated = config.encoder_calibrated;
 
     // a. 通过读到的编码器读数，用线性关系计算当前吊钩距离 hookToTrolleyDistanceM
     if (encoder != nullptr) {

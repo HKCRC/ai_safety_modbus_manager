@@ -30,6 +30,7 @@ struct ModbusConfig {
 
     float encoder_k = 1.0f;
     float encoder_b = 0.0f;
+    bool encoder_calibrated = false;
 
     int loop_ms = 1000;
     

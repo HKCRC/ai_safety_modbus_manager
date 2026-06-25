@@ -51,6 +51,9 @@ bool ModbusConfig::loadFromFile(const std::string& path) {
 
     if (root.isMember("encoder_k") && root["encoder_k"].isNumeric()) encoder_k = root["encoder_k"].asFloat();
     if (root.isMember("encoder_b") && root["encoder_b"].isNumeric()) encoder_b = root["encoder_b"].asFloat();
+    if (root.isMember("encoder_calibrated") && root["encoder_calibrated"].isBool()) {
+        encoder_calibrated = root["encoder_calibrated"].asBool();
+    }
 
     if (root.isMember("loop_ms") && root["loop_ms"].isInt()) loop_ms = root["loop_ms"].asInt();
 
