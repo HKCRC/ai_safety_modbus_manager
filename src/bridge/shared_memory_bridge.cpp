@@ -124,6 +124,8 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     const bool hook_ok = (hook != nullptr && hook->is_connected());
     const bool is_flat_top = (config.crane_type == "flat" || config.crane_type == "flat_top" ||
                               config.crane_type == "flat_top_tower_crane");
+    const bool is_luffing = (config.crane_type == "luffing");
+    const bool is_special = (config.crane_type == "special");
 
     // ============================================================
     // 1. TrolleyConnectFaultInfo — 小车连接异常
@@ -148,11 +150,18 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     ai_safety_common::TrolleyDevicesErrorInfo devices_error{};
     devices_error.timestamp = timestamp_seconds;
     if (trolley_ok) {
-        devices_error.bmsCommunicationFault = !trolley_status.bms_read_ok;
-        devices_error.mpptCommunicationFault = !trolley_status.mppt_read_ok;
+
+        devices_error.bmsCommunicationFault = (trolley_status.bms_read_ok == 0);
+        devices_error.mpptCommunicationFault = (trolley_status.mppt_read_ok == 0);
         devices_error.laserCommunicationFault =
-            !trolley_status.laser_1_read_ok || !trolley_status.laser_2_read_ok;
-        devices_error.cctvCommunicationFault = !trolley_status.cctv_ping_ok;
+            (trolley_status.laser_1_read_ok == 0) || (trolley_status.laser_2_read_ok == 0);
+        devices_error.cctvCommunicationFault = (trolley_status.cctv_ping_ok == 0);
+
+        // 针对动臂和特殊版本（硬件上没有电池和MPPT），屏蔽 BMS 和 MPPT 的通信异常误报
+        if (is_luffing || is_special) {
+            devices_error.bmsCommunicationFault = false;
+            devices_error.mpptCommunicationFault = false;
+        }
     }
     signal_trolley_devices_error_info_(devices_error);
 
@@ -162,6 +171,21 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
     ai_safety_common::DeviceStatus device_status{};
     device_status.timestamp = timestamp_seconds;
     device_status.trolleyState = trolley_state_from(trolley_status, trolley_ok);
+
+    // 对于动臂(luffing)或特殊版本(special)，因为没有电池，所以底层程序必然/大概率会报 Error
+    // 我们必须手动介入，只根据它们真正拥有的传感器（激光和CCTV）来判定状态
+    if (device_status.trolleyState == ai_safety_common::DeviceStatus::EquipmentState::Error) {
+        if (is_luffing || is_special) {
+            // 只要没有发生激光或CCTV的通信异常，就认为设备是正常使用中
+            // 注意：这里使用 ! 判断，如果 Laser=1(故障) 或 CCTV=1(故障)，is_core_sensors_ok 就是 false
+            const bool is_core_sensors_ok = !devices_error.laserCommunicationFault &&
+                                            !devices_error.cctvCommunicationFault;
+
+            if (is_core_sensors_ok) {
+                device_status.trolleyState = ai_safety_common::DeviceStatus::EquipmentState::Active;
+            }
+        }
+    }
 
     if (is_flat_top) {
         device_status.solarCharge = solar_charge_from_mppt(
@@ -183,7 +207,13 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
                 ? static_cast<std::uint32_t>(trolley_status.discharge_time_min)
                 : 0u;
     } else {
+        // 对于 luffing 和 special，强制屏蔽电量和太阳能输出（写入默认值）
         device_status.trolleyBattery.percent = 100u;
+        device_status.trolleyBattery.voltageV = 0.0f;
+        device_status.trolleyBattery.currentA = 0.0f;
+        device_status.trolleyBattery.isCharging = false;
+        device_status.trolleyBattery.chargingTimeMin = 0u;
+        device_status.trolleyBattery.remainingMin = 0u;
         device_status.solarCharge = ai_safety_common::DeviceStatus::SolarChargeState::NotCharging;
     }
 
@@ -238,7 +268,8 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
         const float corrected_height_2_m =
             (laser_distance_2 != 0u) ? laser_distance_2_m * cos_deg(config.laser2_tilt_deg) : 0.0f;
 
-        crane_state.groundToTrolleyDistanceM = std::max(corrected_height_1_m, corrected_height_2_m);
+        
+        crane_state.groundToTrolleyDistanceM = std::max(corrected_height_1_m, corrected_height_2_m) * 100.0f;
     }
 
 

@@ -1,5 +1,5 @@
 {
-    "crane_type": "flat",
+    "crane_type": "luffing",
     "x86_ip": "192.168.61.2",
     "trolley_ip": "192.168.61.36",
     "cab_bridge_ip": "192.168.61.67",
@@ -8,7 +8,7 @@
     "trolley_port": 502,
     "trolley_slave": 1,
 
-    "hook_mqtt_device_id": "ais006",
+    "hook_mqtt_device_id": "ais997",
 
     "encoder_dev": "/dev/ttyUSB0",
     "encoder_ip": "",
