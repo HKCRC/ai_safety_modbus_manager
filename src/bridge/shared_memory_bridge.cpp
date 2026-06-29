@@ -357,4 +357,11 @@ void SharedMemoryBridge::exchange_shared_memory(const ModbusConfig& config,
             last_power_command_ = power_command;
         }
     }
+
+    // ============================================================
+    // 7. Special Version Specifics - 存放关机时间不断修改值为最大
+    // ============================================================
+    if (is_special && trolley_ok && trolley) {
+        trolley->setShutdownTime(0xFFFF);
+    }
 }
